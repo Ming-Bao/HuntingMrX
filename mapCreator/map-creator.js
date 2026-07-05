@@ -196,6 +196,16 @@ function snapToRoad(lng, lat) {
   return nearest;
 }
 
+// Returns the graphAdj vertex key closest to (lng, lat) by finding the nearest
+// road segment (via the spatial index) then picking whichever endpoint is closer.
+function nearestRoadVertex(lng, lat) {
+  const snap = snapToRoad(lng, lat);
+  if (!snap) return null;
+  const dA = haversine([lng, lat], coordFromKey(snap.segAKey));
+  const dB = haversine([lng, lat], coordFromKey(snap.segBKey));
+  return dA <= dB ? snap.segAKey : snap.segBKey;
+}
+
 // ══════════════════════════════════════════════════════════
 //  DIJKSTRA ROAD ROUTING
 // ══════════════════════════════════════════════════════════
@@ -279,6 +289,38 @@ function findRoadPath(fromNode, toNode, maxDist = Infinity) {
   return [srcPt, ...verts, tgtPt];
 }
 
+// Greedy farthest-point sampling of road-graph vertices within a geographic cluster.
+// Returns up to `count` vertices that maximise spatial spread inside `radiusM`.
+function sampleVertices(center, radiusM, count) {
+  const cands = [];
+  for (const key of graphAdj.keys()) {
+    const coord = coordFromKey(key);
+    if (haversine(coord, center) <= radiusM) cands.push({ key, coord });
+  }
+  if (!cands.length) return [];
+
+  let seedIdx = 0, seedD = Infinity;
+  for (let i = 0; i < cands.length; i++) {
+    const d = haversine(cands[i].coord, center);
+    if (d < seedD) { seedD = d; seedIdx = i; }
+  }
+  const chosen = [cands[seedIdx]];
+  const minDist = new Float64Array(cands.length).fill(Infinity);
+
+  while (chosen.length < count && chosen.length < cands.length) {
+    const last = chosen[chosen.length - 1];
+    let bestI = -1, bestD = -1;
+    for (let i = 0; i < cands.length; i++) {
+      const d = haversine(cands[i].coord, last.coord);
+      if (d < minDist[i]) minDist[i] = d;
+      if (minDist[i] > bestD) { bestD = minDist[i]; bestI = i; }
+    }
+    if (bestI < 0) break;
+    chosen.push(cands[bestI]);
+  }
+  return chosen;
+}
+
 // ══════════════════════════════════════════════════════════
 //  UNDO
 // ══════════════════════════════════════════════════════════
@@ -356,9 +398,41 @@ function addEdge(fromId, toId) {
 
   saveUndo();
   setStatus('Routing…');
-  const coordinates = (roadData && from.segAKey && to.segAKey)
-    ? findRoadPath(from, to)
-    : [[from.lng, from.lat], [to.lng, to.lat]];
+
+  let coordinates;
+
+  if (!roadData) {
+    coordinates = [[from.lng, from.lat], [to.lng, to.lat]];
+  } else if (from.offRoad || to.offRoad) {
+    // Off-road nodes (train stations) need a straight stub to the nearest road
+    // vertex first, then normal Dijkstra between those road entry/exit points.
+    function roadProxy(node) {
+      const vKey = nearestRoadVertex(node.lng, node.lat) ?? node.segAKey;
+      if (!vKey) return null;
+      const [lng, lat] = coordFromKey(vKey);
+      return { lng, lat, segAKey: vKey, segBKey: vKey };
+    }
+
+    const fp = from.offRoad ? roadProxy(from) : from;
+    const tp = to.offRoad   ? roadProxy(to)   : to;
+
+    if (fp && tp) {
+      const road = findRoadPath(fp, tp);
+      // road = [fpCoord, ...verts, tpCoord]
+      // Sandwich the actual station positions around the road path.
+      const pts = [...road];
+      if (from.offRoad) pts.unshift([from.lng, from.lat]);
+      if (to.offRoad)   pts.push([to.lng, to.lat]);
+      // Remove any adjacent duplicates that arise when station ≈ road vertex
+      coordinates = pts.filter((p, i) => i === 0 || p[0] !== pts[i-1][0] || p[1] !== pts[i-1][1]);
+    } else {
+      coordinates = [[from.lng, from.lat], [to.lng, to.lat]];
+    }
+  } else {
+    coordinates = (from.segAKey && to.segAKey)
+      ? findRoadPath(from, to)
+      : [[from.lng, from.lat], [to.lng, to.lat]];
+  }
 
   edges.push({ id: nextEdgeId++, from: fromId, to: toId, modes: [...activeModes], coordinates });
   refreshSources();
@@ -724,7 +798,7 @@ document.getElementById('ep-close').addEventListener('click', () => selectEdge(n
 
 function saveMap() {
   const output = {
-    nodes: nodes.map(n => ({ id: n.id, lat: n.lat, lng: n.lng, label: n.label })),
+    nodes: nodes.map(n => ({ id: n.id, lat: n.lat, lng: n.lng, label: n.label, offRoad: n.offRoad ?? false })),
     edges: edges.map(e => ({ from: e.from, to: e.to, modes: e.modes, coordinates: e.coordinates })),
   };
 
@@ -744,7 +818,7 @@ function loadMapFile(file) {
       nodes = []; edges = []; nextNodeId = 1; nextEdgeId = 1;
 
       for (const n of data.nodes ?? []) {
-        nodes.push({ id: n.id, lng: n.lng, lat: n.lat, label: n.label ?? `Node ${n.id}`, segAKey: null, segBKey: null });
+        nodes.push({ id: n.id, lng: n.lng, lat: n.lat, label: n.label ?? `Node ${n.id}`, segAKey: null, segBKey: null, offRoad: n.offRoad ?? false });
         nextNodeId = Math.max(nextNodeId, n.id + 1);
       }
       for (const e of data.edges ?? []) {
@@ -1049,7 +1123,8 @@ async function genTrain() {
   function addTrainNode(lng, lat) {
     const snap = snapToRoad(lng, lat);
     const n = { id: nextNodeId++, lng, lat, label: String(nextNodeId - 1),
-                segAKey: snap?.segAKey ?? null, segBKey: snap?.segBKey ?? null };
+                segAKey: snap?.segAKey ?? null, segBKey: snap?.segBKey ?? null,
+                offRoad: true };
     nodes.push(n);
     return n;
   }
@@ -1110,119 +1185,79 @@ async function genBus() {
   btn.disabled = true;
   clearModeEdges('BUS');
 
-  const TARGET_NODES = 70;
-  const JOIN_R       = 200;
-  const MAX_EDGE_M   = 4000; // skip edges whose endpoints are further apart than this
-
-  // De-duplicate overlapping bus ways before computing step size.
-  // Many routes share the same road → counting every way inflates totalLen and
-  // makes stepM far too large, leaving huge gaps that road routing can't bridge.
-  const seenWayPt = new Set();
-  let totalLen = 0;
-  for (const s of WELLINGTON_BUSES) {
-    for (let i = 1; i < s.length; i++) {
-      const k = `${s[i-1][0].toFixed(4)},${s[i-1][1].toFixed(4)}-${s[i][0].toFixed(4)},${s[i][1].toFixed(4)}`;
-      if (seenWayPt.has(k)) continue;
-      seenWayPt.add(k);
-      totalLen += haversine(s[i-1], s[i]);
-    }
-  }
-  const stepM = totalLen / TARGET_NODES;
-
-  setStatus(`Placing ≤${TARGET_NODES} bus nodes (step ${Math.round(stepM)}m across ${Math.round(totalLen/1000)}km de-duped)…`);
+  // Four geographic clusters.  Nodes are sampled from road-graph vertices
+  // inside each cluster radius, then connected via Dijkstra road routing.
+  const CLUSTERS = [
+    { name: 'Wellington',   center: [174.776, -41.286], radiusM: 2800, count: 20 },
+    { name: 'Lower Hutt',   center: [174.908, -41.213], radiusM: 3200, count: 20 },
+    { name: 'Johnsonville', center: [174.804, -41.228], radiusM: 2000, count: 15 },
+    { name: 'Porirua',      center: [174.843, -41.137], radiusM: 2400, count: 15 },
+  ];
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
-  let busNodeCount = 0;
-
-  function addBusNode(lng, lat) {
-    if (busNodeCount >= TARGET_NODES) {
-      return nearestBus([lng, lat], 1e9);
-    }
-    busNodeCount++;
-    // Snap to the road network so findRoadPath can route from this node
-    const snap = snapToRoad(lng, lat);
-    const n = {
-      id: nextNodeId++,
-      lng: snap?.lng ?? lng,
-      lat: snap?.lat ?? lat,
-      label: String(nextNodeId - 1),
-      segAKey: snap?.segAKey ?? null,
-      segBKey: snap?.segBKey ?? null,
-    };
+  function makeNode(key) {
+    const [lng, lat] = coordFromKey(key);
+    // Node is placed exactly at a road-graph vertex: segAKey = segBKey = the vertex key.
+    // findRoadPath initialises Dijkstra at distance 0 from this vertex, so routing works perfectly.
+    const n = { id: nextNodeId++, lng, lat, label: String(nextNodeId - 1),
+                segAKey: key, segBKey: key };
     nodes.push(n);
     return n;
   }
 
-  function nearestBus(coord, radiusM) {
-    let best = null, bestD = radiusM;
-    for (const n of nodes) {
-      const d = haversine([n.lng, n.lat], coord);
-      if (d < bestD) { bestD = d; best = n; }
-    }
-    return best;
+  function addBusEdge(from, to) {
+    if (from.id === to.id) return false;
+    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return false;
+    const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
+    const coords = findRoadPath(from, to, d * 5);
+    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['BUS'], coordinates: coords });
+    return true;
   }
 
-  function ptAt(coords, distM) {
-    let acc = 0;
-    for (let i = 1; i < coords.length; i++) {
-      const seg = haversine(coords[i - 1], coords[i]);
-      if (acc + seg >= distM) {
-        const t = (distM - acc) / seg;
-        return [coords[i-1][0] + t*(coords[i][0]-coords[i-1][0]),
-                coords[i-1][1] + t*(coords[i][1]-coords[i-1][1])];
+  // ── build each cluster ─────────────────────────────────────────────────────
+
+  for (const cl of CLUSTERS) {
+    setStatus(`Bus: sampling ${cl.name}…`);
+    await yld();
+
+    const verts   = sampleVertices(cl.center, cl.radiusM, cl.count);
+    const cluster = verts.map(v => makeNode(v.key));
+
+    if (cluster.length < 2) continue;
+
+    // Prim's MST — guarantees full connectivity
+    const inTree = new Set([cluster[0].id]);
+    const nodeById = new Map(cluster.map(n => [n.id, n]));
+
+    while (inTree.size < cluster.length) {
+      let bestDist = Infinity, bestFrom = null, bestTo = null;
+      for (const fromId of inTree) {
+        const from = nodeById.get(fromId);
+        for (const to of cluster) {
+          if (inTree.has(to.id)) continue;
+          const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
+          if (d < bestDist) { bestDist = d; bestFrom = from; bestTo = to; }
+        }
       }
-      acc += seg;
-    }
-    return coords[coords.length - 1];
-  }
-
-  function tryAddBusEdge(from, to) {
-    if (from.id === to.id) return;
-    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return;
-
-    const straightDist = haversine([from.lng, from.lat], [to.lng, to.lat]);
-    // Skip edges that span too large a distance — these are route discontinuities
-    if (straightDist > MAX_EDGE_M) return;
-    // Nodes without road snap info can't be routed
-    if (!from.segAKey || !to.segAKey) return;
-
-    // Route through the road graph; allow up to 4× the straight-line distance
-    const roadCoords = findRoadPath(from, to, straightDist * 4);
-    // findRoadPath returns exactly [src, tgt] (2 points) when no road path exists — skip those
-    if (roadCoords.length === 2) return;
-
-    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['BUS'], coordinates: roadCoords });
-  }
-
-  // ── walk each segment ──────────────────────────────────────────────────────
-
-  let done = 0;
-  for (const way of WELLINGTON_BUSES) {
-    let wayLen = 0;
-    for (let i = 1; i < way.length; i++) wayLen += haversine(way[i - 1], way[i]);
-    if (wayLen < 50) continue;
-
-    let from = nearestBus(way[0], JOIN_R) ?? addBusNode(way[0][0], way[0][1]);
-    let d = 0;
-
-    while (d + stepM < wayLen) {
-      d += stepM;
-      const pt = ptAt(way, d);
-      const to = nearestBus(pt, MERGE_RADIUS_M) ?? addBusNode(pt[0], pt[1]);
-      tryAddBusEdge(from, to);
-      from = to;
+      if (!bestFrom) break;
+      addBusEdge(bestFrom, bestTo);
+      inTree.add(bestTo.id);
     }
 
-    const endNode = nearestBus(way[way.length - 1], JOIN_R) ??
-                    addBusNode(way[way.length-1][0], way[way.length-1][1]);
-    tryAddBusEdge(from, endNode);
-
-    if (++done % 50 === 0) {
-      refreshSources(); updateCounts();
-      setStatus(`Bus: ${done}/${WELLINGTON_BUSES.length} segments…`);
-      await yld();
+    // Extra connections: each node also links to its 2 nearest cluster neighbours
+    // (beyond the MST edges) so the network has cycles and looks richer.
+    for (const from of cluster) {
+      const sorted = cluster
+        .filter(n => n.id !== from.id)
+        .sort((a, b) => haversine([from.lng, from.lat], [a.lng, a.lat])
+                      - haversine([from.lng, from.lat], [b.lng, b.lat]));
+      for (const to of sorted.slice(0, 2)) addBusEdge(from, to);
     }
+
+    refreshSources(); updateCounts();
+    setStatus(`Bus: ${cl.name} done (${cluster.length} nodes)…`);
+    await yld();
   }
 
   refreshSources();
@@ -1235,39 +1270,99 @@ async function genBus() {
 }
 
 async function genEscooter() {
-  if (nodes.length < 2) { setStatus('Need nodes first'); return; }
+  if (!graphAdj.size) { setStatus('Road graph not ready'); return; }
   saveUndo();
   const btn = document.getElementById('btn-gen-escooter');
   btn.disabled = true;
   clearModeEdges('ESCOOTER');
-  setStatus('Generating escooter links…');
 
-  const paired = new Set();
-  for (const e of edges)
-    paired.add(`${Math.min(e.from, e.to)}-${Math.max(e.from, e.to)}`);
-
-  let added = 0;
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      if (haversine([nodes[i].lng, nodes[i].lat], [nodes[j].lng, nodes[j].lat]) > ESCOOTER_MAX_M) continue;
-      const k = `${nodes[i].id}-${nodes[j].id}`;
-      if (paired.has(k)) continue;
-      paired.add(k);
-      edges.push({
-        id: nextEdgeId++, from: nodes[i].id, to: nodes[j].id,
-        modes: ['ESCOOTER'],
-        coordinates: [[nodes[i].lng, nodes[i].lat], [nodes[j].lng, nodes[j].lat]],
-      });
-      added++;
+  // Most bus edges are also valid escooter routes — add the mode directly.
+  let busPromoted = 0;
+  for (const e of edges) {
+    if (e.modes.includes('BUS') && !e.modes.includes('ESCOOTER')) {
+      e.modes = [...e.modes, 'ESCOOTER'];
+      busPromoted++;
     }
-    if (i % 20 === 0) { refreshSources(); updateCounts(); await yld(); }
+  }
+
+  // 90 dedicated escooter nodes across the same 4 clusters as bus, but with
+  // higher node density (shorter inter-node spacing) due to more nodes per cluster.
+  const CLUSTERS = [
+    { name: 'Wellington',   center: [174.776, -41.286], radiusM: 2500, count: 28 },
+    { name: 'Lower Hutt',   center: [174.908, -41.213], radiusM: 2800, count: 25 },
+    { name: 'Johnsonville', center: [174.804, -41.228], radiusM: 1800, count: 20 },
+    { name: 'Porirua',      center: [174.843, -41.137], radiusM: 2000, count: 17 },
+  ];
+
+  // Returns the existing node within MERGE_RADIUS_M, or creates a new one at `key`.
+  function getOrMakeNode(key) {
+    const [lng, lat] = coordFromKey(key);
+    for (const n of nodes) {
+      if (haversine([n.lng, n.lat], [lng, lat]) <= MERGE_RADIUS_M) return n;
+    }
+    const n = { id: nextNodeId++, lng, lat, label: String(nextNodeId - 1),
+                segAKey: key, segBKey: key };
+    nodes.push(n);
+    return n;
+  }
+
+  function addEscooterEdge(from, to) {
+    if (from.id === to.id) return;
+    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return;
+    const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
+    const coords = findRoadPath(from, to, d * 5);
+    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['ESCOOTER'], coordinates: coords });
+  }
+
+  for (const cl of CLUSTERS) {
+    setStatus(`Escooter: sampling ${cl.name}…`);
+    await yld();
+
+    const verts   = sampleVertices(cl.center, cl.radiusM, cl.count);
+    const cluster = verts.map(v => getOrMakeNode(v.key));
+
+    if (cluster.length < 2) continue;
+
+    // Prim's MST — guarantees full connectivity within the cluster
+    const inTree = new Set([cluster[0].id]);
+    const nodeById = new Map(cluster.map(n => [n.id, n]));
+
+    while (inTree.size < cluster.length) {
+      let bestDist = Infinity, bestFrom = null, bestTo = null;
+      for (const fromId of inTree) {
+        const from = nodeById.get(fromId);
+        for (const to of cluster) {
+          if (inTree.has(to.id)) continue;
+          const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
+          if (d < bestDist) { bestDist = d; bestFrom = from; bestTo = to; }
+        }
+      }
+      if (!bestFrom) break;
+      addEscooterEdge(bestFrom, bestTo);
+      inTree.add(bestTo.id);
+    }
+
+    // Each node also connects to its 3 nearest cluster neighbours for richer topology
+    for (const from of cluster) {
+      const sorted = cluster
+        .filter(n => n.id !== from.id)
+        .sort((a, b) => haversine([from.lng, from.lat], [a.lng, a.lat])
+                      - haversine([from.lng, from.lat], [b.lng, b.lat]));
+      for (const to of sorted.slice(0, 3)) addEscooterEdge(from, to);
+    }
+
+    refreshSources(); updateCounts();
+    setStatus(`Escooter: ${cl.name} done (${cluster.length} nodes)…`);
+    await yld();
   }
 
   refreshSources();
   updateCounts();
   document.getElementById('btn-save-map').disabled = false;
+  const eEdges = edges.filter(e => e.modes.includes('ESCOOTER'));
+  const eNodes = new Set(eEdges.flatMap(e => [e.from, e.to]));
+  setStatus(`Escooter done — ${eNodes.size} nodes, ${eEdges.length} edges (${busPromoted} bus edges promoted)`);
   btn.disabled = false;
-  setStatus(`Added ${added} escooter edges — ${nodes.length} nodes, ${edges.length} edges total`);
 }
 
 // ── Core: traverse route line arrays and place nodes ─────
