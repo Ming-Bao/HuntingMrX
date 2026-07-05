@@ -79,6 +79,9 @@ let nextEdgeId = 1;
 let activeModes    = new Set(['ESCOOTER', 'BUS']); // modes applied to new edges
 let selectedEdgeId = null;
 
+const undoStack = [];
+const UNDO_MAX  = 20;
+
 const drag = { active: false, nodeId: null, moved: false, justDragged: false };
 
 // ══════════════════════════════════════════════════════════
@@ -277,10 +280,40 @@ function findRoadPath(fromNode, toNode, maxDist = Infinity) {
 }
 
 // ══════════════════════════════════════════════════════════
+//  UNDO
+// ══════════════════════════════════════════════════════════
+
+function saveUndo() {
+  undoStack.push({
+    nodes: structuredClone(nodes),
+    edges: structuredClone(edges),
+    nextNodeId,
+    nextEdgeId,
+  });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  document.getElementById('btn-undo').disabled = false;
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  const snap = undoStack.pop();
+  nodes      = snap.nodes;
+  edges      = snap.edges;
+  nextNodeId = snap.nextNodeId;
+  nextEdgeId = snap.nextEdgeId;
+  if (selectedEdgeId !== null) selectEdge(null);
+  refreshSources();
+  updateCounts();
+  if (!undoStack.length) document.getElementById('btn-undo').disabled = true;
+  setStatus(`Undo — ${nodes.length} nodes, ${edges.length} edges`);
+}
+
+// ══════════════════════════════════════════════════════════
 //  NODE / EDGE MANAGEMENT
 // ══════════════════════════════════════════════════════════
 
 function addNode(snap) {
+  saveUndo();
   const id   = nextNodeId++;
   const node = { id, lng: snap.lng, lat: snap.lat, label: String(id), segAKey: snap.segAKey, segBKey: snap.segBKey };
   nodes.push(node);
@@ -294,12 +327,14 @@ function renameNode(id) {
   if (!node) return;
   const newLabel = prompt(`Rename node ${id}:`, node.label);
   if (newLabel !== null) {
+    saveUndo();
     node.label = newLabel.trim() || node.label;
     refreshSources();
   }
 }
 
 function removeNode(id) {
+  saveUndo();
   nodes = nodes.filter(n => n.id !== id);
   edges = edges.filter(e => e.from !== id && e.to !== id);
   refreshSources();
@@ -319,6 +354,7 @@ function addEdge(fromId, toId) {
     return;
   }
 
+  saveUndo();
   setStatus('Routing…');
   const coordinates = (roadData && from.segAKey && to.segAKey)
     ? findRoadPath(from, to)
@@ -331,6 +367,7 @@ function addEdge(fromId, toId) {
 }
 
 function removeEdge(id) {
+  saveUndo();
   edges = edges.filter(e => e.id !== id);
   refreshSources();
   updateCounts();
@@ -649,6 +686,7 @@ document.querySelectorAll('.ep-mode-btn').forEach(btn => {
     if (selectedEdgeId === null) return;
     const edge = edges.find(e => e.id === selectedEdgeId);
     if (!edge) return;
+    saveUndo();
     const m = btn.dataset.mode;
     if (edge.modes.includes(m)) {
       if (edge.modes.length > 1) edge.modes = edge.modes.filter(x => x !== m);
@@ -687,6 +725,7 @@ function loadMapFile(file) {
   reader.onload = ev => {
     try {
       const data = JSON.parse(ev.target.result);
+      saveUndo();
       nodes = []; edges = []; nextNodeId = 1; nextEdgeId = 1;
 
       for (const n of data.nodes ?? []) {
@@ -738,6 +777,9 @@ function autoLoadRoads() {
     buildIndex(roadData);
     document.getElementById('btn-save-map').disabled = false;
     document.getElementById('btn-auto-gen').disabled = false;
+    document.getElementById('btn-gen-train').disabled = false;
+    document.getElementById('btn-gen-bus').disabled = false;
+    document.getElementById('btn-gen-escooter').disabled = false;
     setStatus(`Ready — ${graphAdj.size.toLocaleString()} road vertices. Click a road to place a node.`);
   }, 30);
 }
@@ -750,6 +792,7 @@ async function autoGenerate() {
   if (!graphAdj.size) { setStatus('Road graph not ready yet'); return; }
   if ((nodes.length || edges.length) && !confirm('Clear all existing nodes and edges and auto-generate?')) return;
 
+  saveUndo();
   const btn = document.getElementById('btn-auto-gen');
   btn.disabled = true;
 
@@ -857,6 +900,616 @@ async function autoGenerate() {
 }
 
 // ══════════════════════════════════════════════════════════
+//  ROUTE-BASED GENERATION  (Train / Bus / Escooter)
+// ══════════════════════════════════════════════════════════
+
+const TRAIN_STEP_M   = 1200;  // target spacing between consecutive train nodes
+const BUS_STEP_M     = 500;   // target spacing between consecutive bus nodes
+const MERGE_RADIUS_M = 150;   // nodes closer than this are merged, not duplicated
+const ESCOOTER_MAX_M = 400;   // max straight-line distance for an escooter edge
+const MAX_BRIDGE_M   = 500;   // max gap to bridge between disconnected train components
+
+// Strip all edges of the given mode, then remove any nodes left with no edges.
+function clearModeEdges(mode) {
+  edges = edges
+    .map(e => ({ ...e, modes: e.modes.filter(m => m !== mode) }))
+    .filter(e => e.modes.length > 0);
+  const connected = new Set(edges.flatMap(e => [e.from, e.to]));
+  nodes = nodes.filter(n => connected.has(n.id));
+  refreshSources();
+  updateCounts();
+}
+
+// ── Entry points (button handlers) ───────────────────────
+
+// Keep segments that have at least one point inside the game area.
+// Stops the Kapiti Line at Porirua (lat ≈ -41.13) and Hutt/Wairarapa at Upper Hutt (lat ≈ -41.12).
+function inTrainGameArea([lng, lat]) {
+  return lat >= -41.40 && lat <= -41.12 && lng >= 174.70 && lng <= 175.15;
+}
+
+// Sort an array of [[lng,lat],...] polylines into a geographically coherent
+// order starting from Wellington Station, so that consecutive ways share their
+// endpoints. Each way is also oriented (possibly reversed) so its first coord
+// is the one nearest to the previous way's last coord. This ensures upsertNode
+// merges consecutive way endpoints rather than leaving gaps that connectTrainComponents
+// would bridge with wrong straight-line edges.
+function sortWaysFromOrigin(ways) {
+  if (ways.length <= 1) return ways;
+  const WGN = [174.7795, -41.2790]; // Wellington Station
+
+  function orientToward(way, ref) {
+    const dF = haversine(way[0], ref);
+    const dL = haversine(way[way.length - 1], ref);
+    return dL < dF ? [...way].reverse() : way;
+  }
+
+  // Seed: pick the way whose nearest endpoint is closest to Wellington Station
+  let seedIdx = 0, seedD = Infinity;
+  for (let i = 0; i < ways.length; i++) {
+    const d = Math.min(haversine(ways[i][0], WGN), haversine(ways[i][ways[i].length - 1], WGN));
+    if (d < seedD) { seedD = d; seedIdx = i; }
+  }
+
+  const sorted = [orientToward(ways[seedIdx], WGN)];
+  const used   = new Set([seedIdx]);
+
+  // Greedy nearest-neighbour: at each step extend the chain from its current
+  // end to the closest unused way (handles straight lines and branches alike).
+  while (used.size < ways.length) {
+    const end = sorted[sorted.length - 1];
+    const ref = end[end.length - 1];
+
+    let bestD = Infinity, bestIdx = -1, bestRev = false;
+    for (let i = 0; i < ways.length; i++) {
+      if (used.has(i)) continue;
+      const dS = haversine(ways[i][0], ref);
+      const dE = haversine(ways[i][ways[i].length - 1], ref);
+      if (dS < bestD) { bestD = dS; bestIdx = i; bestRev = false; }
+      if (dE < bestD) { bestD = dE; bestIdx = i; bestRev = true;  }
+    }
+    if (bestIdx === -1) break;
+    sorted.push(bestRev ? [...ways[bestIdx]].reverse() : ways[bestIdx]);
+    used.add(bestIdx);
+  }
+  return sorted;
+}
+
+// Sample 5 evenly-spaced points from a polyline (start, 25%, 50%, 75%, end).
+function sampleWayPts(line) {
+  return [0, 0.25, 0.5, 0.75, 1].map(t =>
+    line[Math.min(Math.floor(t * line.length), line.length - 1)]
+  );
+}
+
+// Drop near-duplicate rail way segments that represent parallel tracks
+// (northbound / southbound).
+// Two ways are considered parallel if ≥2 of their 5 sample-point pairs are
+// within radiusM of each other. When a parallel is found, the way whose
+// midpoint is MORE SOUTHERN (lower latitude = lower on a north-up map) is
+// kept; the other is discarded.
+function deduplicateParallelWays(lines, radiusM = 80) {
+  const kept     = [];
+  const keptPts  = [];
+
+  outer: for (const line of lines) {
+    const pts = sampleWayPts(line);
+
+    for (let ki = 0; ki < kept.length; ki++) {
+      const kpts = keptPts[ki];
+      let closeCount = 0;
+      for (const p of pts) {
+        if (kpts.some(kp => haversine(p, kp) < radiusM)) closeCount++;
+      }
+      if (closeCount >= 2) {
+        // Parallel — keep whichever midpoint is more southern (lower latitude).
+        if (pts[2][1] < kpts[2][1]) {
+          kept[ki]    = line;
+          keptPts[ki] = pts;
+        }
+        continue outer;
+      }
+    }
+
+    kept.push(line);
+    keptPts.push(pts);
+  }
+  return kept;
+}
+
+async function genTrain() {
+  if (!graphAdj.size) { setStatus('Road graph not ready'); return; }
+  saveUndo();
+  const btn = document.getElementById('btn-gen-train');
+  btn.disabled = true;
+  clearModeEdges('TRAIN');
+
+  // Snap radius: way endpoints within this distance merge to an existing node.
+  // Handles junctions where multiple lines share a station and short tail segments.
+  const JOIN_R = 300;
+
+  const TARGET_NODES = 50;
+  const segs = WELLINGTON_TRAINS.filter(s => s.some(inTrainGameArea));
+
+  // Compute step size so the total track length yields ~TARGET_NODES interval nodes
+  let totalLen = 0;
+  for (const s of segs) for (let i = 1; i < s.length; i++) totalLen += haversine(s[i-1], s[i]);
+  const stepM = totalLen / TARGET_NODES;
+
+  setStatus(`Placing ~${TARGET_NODES} train nodes (step ${Math.round(stepM)}m across ${Math.round(totalLen/1000)}km)…`);
+
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  function addTrainNode(lng, lat) {
+    // Keep node at the track position but store nearest road seg keys so that
+    // findRoadPath works when the user manually drags an edge from this node.
+    const snap = snapToRoad(lng, lat);
+    const n = { id: nextNodeId++, lng, lat, label: String(nextNodeId - 1),
+                segAKey: snap?.segAKey ?? null, segBKey: snap?.segBKey ?? null };
+    nodes.push(n);
+    return n;
+  }
+
+  // Nearest node within radiusM, or null
+  function nearest(coord, radiusM) {
+    let best = null, bestD = radiusM;
+    for (const n of nodes) {
+      const d = haversine([n.lng, n.lat], coord);
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+  }
+
+  // Coordinate at distM metres along a polyline
+  function ptAt(coords, distM) {
+    let acc = 0;
+    for (let i = 1; i < coords.length; i++) {
+      const seg = haversine(coords[i - 1], coords[i]);
+      if (acc + seg >= distM) {
+        const t = (distM - acc) / seg;
+        return [coords[i-1][0] + t*(coords[i][0]-coords[i-1][0]),
+                coords[i-1][1] + t*(coords[i][1]-coords[i-1][1])];
+      }
+      acc += seg;
+    }
+    return coords[coords.length - 1];
+  }
+
+  // Sub-array of coordinates between d0 and d1 metres along the polyline
+  function sliceLine(coords, d0, d1) {
+    const out = [ptAt(coords, d0)];
+    let acc = 0;
+    for (let i = 1; i < coords.length; i++) {
+      const a = coords[i - 1], b = coords[i];
+      const seg = haversine(a, b), end = acc + seg;
+      if (end > d0 && acc < d1) {
+        if (end <= d1) out.push(b);
+        else {
+          const t = (d1 - acc) / seg;
+          out.push([a[0] + t*(b[0]-a[0]), a[1] + t*(b[1]-a[1])]);
+        }
+      }
+      acc = end;
+      if (acc >= d1) break;
+    }
+    return out;
+  }
+
+  function tryAddEdge(from, to, coords) {
+    if (from.id === to.id) return;
+    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return;
+    // Snap edge endpoints to the actual node positions so no visual gap appears
+    const c = [[from.lng, from.lat], ...coords.slice(1, -1), [to.lng, to.lat]];
+    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['TRAIN'], coordinates: c });
+  }
+
+  // ── walk each way ──────────────────────────────────────────────────────────
+
+  let done = 0;
+  for (const way of segs) {
+    let wayLen = 0;
+    for (let i = 1; i < way.length; i++) wayLen += haversine(way[i - 1], way[i]);
+    if (wayLen < 50) continue;
+
+    // Start node: snap to an existing nearby node or create one at the way start
+    let from = nearest(way[0], JOIN_R) ?? addTrainNode(way[0][0], way[0][1]);
+    let d = 0;
+
+    // Place a node every stepM and connect with a route-geometry edge
+    while (d + stepM < wayLen) {
+      const d0 = d;
+      d += stepM;
+      const pt = ptAt(way, d);
+      const to = nearest(pt, MERGE_RADIUS_M) ?? addTrainNode(pt[0], pt[1]);
+      tryAddEdge(from, to, sliceLine(way, d0, d));
+      from = to;
+    }
+
+    // Tail segment: snap the way end to a nearby node (absorbs micro-tails)
+    // or create a new node, then connect
+    const endNode = nearest(way[way.length - 1], JOIN_R) ??
+                    addTrainNode(way[way.length-1][0], way[way.length-1][1]);
+    tryAddEdge(from, endNode, sliceLine(way, d, wayLen));
+
+    if (++done % 10 === 0) {
+      refreshSources(); updateCounts();
+      setStatus(`Train: ${done}/${segs.length} segments…`);
+      await yld();
+    }
+  }
+
+  refreshSources();
+  updateCounts();
+  document.getElementById('btn-save-map').disabled = false;
+  const tEdges = edges.filter(e => e.modes.includes('TRAIN'));
+  const tNodes = new Set(tEdges.flatMap(e => [e.from, e.to]));
+  setStatus(`Train done — ${tNodes.size} nodes, ${tEdges.length} edges`);
+  btn.disabled = false;
+}
+
+async function genBus() {
+  if (!graphAdj.size) { setStatus('Road graph not ready'); return; }
+  saveUndo();
+  const btn = document.getElementById('btn-gen-bus');
+  btn.disabled = true;
+  clearModeEdges('BUS');
+
+  const TARGET_NODES = 70;
+  const JOIN_R       = 200;
+  const MAX_EDGE_M   = 4000; // skip edges whose endpoints are further apart than this
+
+  // De-duplicate overlapping bus ways before computing step size.
+  // Many routes share the same road → counting every way inflates totalLen and
+  // makes stepM far too large, leaving huge gaps that road routing can't bridge.
+  const seenWayPt = new Set();
+  let totalLen = 0;
+  for (const s of WELLINGTON_BUSES) {
+    for (let i = 1; i < s.length; i++) {
+      const k = `${s[i-1][0].toFixed(4)},${s[i-1][1].toFixed(4)}-${s[i][0].toFixed(4)},${s[i][1].toFixed(4)}`;
+      if (seenWayPt.has(k)) continue;
+      seenWayPt.add(k);
+      totalLen += haversine(s[i-1], s[i]);
+    }
+  }
+  const stepM = totalLen / TARGET_NODES;
+
+  setStatus(`Placing ≤${TARGET_NODES} bus nodes (step ${Math.round(stepM)}m across ${Math.round(totalLen/1000)}km de-duped)…`);
+
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  let busNodeCount = 0;
+
+  function addBusNode(lng, lat) {
+    if (busNodeCount >= TARGET_NODES) {
+      return nearestBus([lng, lat], 1e9);
+    }
+    busNodeCount++;
+    // Snap to the road network so findRoadPath can route from this node
+    const snap = snapToRoad(lng, lat);
+    const n = {
+      id: nextNodeId++,
+      lng: snap?.lng ?? lng,
+      lat: snap?.lat ?? lat,
+      label: String(nextNodeId - 1),
+      segAKey: snap?.segAKey ?? null,
+      segBKey: snap?.segBKey ?? null,
+    };
+    nodes.push(n);
+    return n;
+  }
+
+  function nearestBus(coord, radiusM) {
+    let best = null, bestD = radiusM;
+    for (const n of nodes) {
+      const d = haversine([n.lng, n.lat], coord);
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+  }
+
+  function ptAt(coords, distM) {
+    let acc = 0;
+    for (let i = 1; i < coords.length; i++) {
+      const seg = haversine(coords[i - 1], coords[i]);
+      if (acc + seg >= distM) {
+        const t = (distM - acc) / seg;
+        return [coords[i-1][0] + t*(coords[i][0]-coords[i-1][0]),
+                coords[i-1][1] + t*(coords[i][1]-coords[i-1][1])];
+      }
+      acc += seg;
+    }
+    return coords[coords.length - 1];
+  }
+
+  function tryAddBusEdge(from, to) {
+    if (from.id === to.id) return;
+    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return;
+
+    const straightDist = haversine([from.lng, from.lat], [to.lng, to.lat]);
+    // Skip edges that span too large a distance — these are route discontinuities
+    if (straightDist > MAX_EDGE_M) return;
+    // Nodes without road snap info can't be routed
+    if (!from.segAKey || !to.segAKey) return;
+
+    // Route through the road graph; allow up to 4× the straight-line distance
+    const roadCoords = findRoadPath(from, to, straightDist * 4);
+    // findRoadPath returns exactly [src, tgt] (2 points) when no road path exists — skip those
+    if (roadCoords.length === 2) return;
+
+    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['BUS'], coordinates: roadCoords });
+  }
+
+  // ── walk each segment ──────────────────────────────────────────────────────
+
+  let done = 0;
+  for (const way of WELLINGTON_BUSES) {
+    let wayLen = 0;
+    for (let i = 1; i < way.length; i++) wayLen += haversine(way[i - 1], way[i]);
+    if (wayLen < 50) continue;
+
+    let from = nearestBus(way[0], JOIN_R) ?? addBusNode(way[0][0], way[0][1]);
+    let d = 0;
+
+    while (d + stepM < wayLen) {
+      d += stepM;
+      const pt = ptAt(way, d);
+      const to = nearestBus(pt, MERGE_RADIUS_M) ?? addBusNode(pt[0], pt[1]);
+      tryAddBusEdge(from, to);
+      from = to;
+    }
+
+    const endNode = nearestBus(way[way.length - 1], JOIN_R) ??
+                    addBusNode(way[way.length-1][0], way[way.length-1][1]);
+    tryAddBusEdge(from, endNode);
+
+    if (++done % 50 === 0) {
+      refreshSources(); updateCounts();
+      setStatus(`Bus: ${done}/${WELLINGTON_BUSES.length} segments…`);
+      await yld();
+    }
+  }
+
+  refreshSources();
+  updateCounts();
+  document.getElementById('btn-save-map').disabled = false;
+  const bEdges = edges.filter(e => e.modes.includes('BUS'));
+  const bNodes = new Set(bEdges.flatMap(e => [e.from, e.to]));
+  setStatus(`Bus done — ${bNodes.size} nodes, ${bEdges.length} edges`);
+  btn.disabled = false;
+}
+
+async function genEscooter() {
+  if (nodes.length < 2) { setStatus('Need nodes first'); return; }
+  saveUndo();
+  const btn = document.getElementById('btn-gen-escooter');
+  btn.disabled = true;
+  clearModeEdges('ESCOOTER');
+  setStatus('Generating escooter links…');
+
+  const paired = new Set();
+  for (const e of edges)
+    paired.add(`${Math.min(e.from, e.to)}-${Math.max(e.from, e.to)}`);
+
+  let added = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      if (haversine([nodes[i].lng, nodes[i].lat], [nodes[j].lng, nodes[j].lat]) > ESCOOTER_MAX_M) continue;
+      const k = `${nodes[i].id}-${nodes[j].id}`;
+      if (paired.has(k)) continue;
+      paired.add(k);
+      edges.push({
+        id: nextEdgeId++, from: nodes[i].id, to: nodes[j].id,
+        modes: ['ESCOOTER'],
+        coordinates: [[nodes[i].lng, nodes[i].lat], [nodes[j].lng, nodes[j].lat]],
+      });
+      added++;
+    }
+    if (i % 20 === 0) { refreshSources(); updateCounts(); await yld(); }
+  }
+
+  refreshSources();
+  updateCounts();
+  document.getElementById('btn-save-map').disabled = false;
+  btn.disabled = false;
+  setStatus(`Added ${added} escooter edges — ${nodes.length} nodes, ${edges.length} edges total`);
+}
+
+// ── Core: traverse route line arrays and place nodes ─────
+
+async function placeAlongRoutes(lines, mode, stepM, jitter = 0) {
+  let newNodes = 0, newEdges = 0;
+
+  for (let li = 0; li < lines.length; li++) {
+    const segs = splitLineAtInterval(lines[li], stepM, jitter);
+
+    for (const seg of segs) {
+      const fromNode = upsertNode(seg.from);
+      const toNode   = upsertNode(seg.to);
+      if (fromNode.id === toNode.id) continue;
+      if (fromNode._new) { newNodes++; fromNode._new = false; }
+      if (toNode._new)   { newNodes++; toNode._new   = false; }
+
+      const ex = edges.find(e =>
+        (e.from === fromNode.id && e.to === toNode.id) ||
+        (e.from === toNode.id   && e.to === fromNode.id)
+      );
+      if (ex) {
+        if (!ex.modes.includes(mode)) ex.modes.push(mode);
+      } else {
+        edges.push({ id: nextEdgeId++, from: fromNode.id, to: toNode.id,
+                     modes: [mode], coordinates: seg.coords });
+        newEdges++;
+      }
+    }
+
+    if (li % 10 === 0) {
+      updateCounts(); refreshSources();
+      setStatus(`${mode}: ${li + 1}/${lines.length} segments — ${newNodes} nodes, ${newEdges} edges`);
+      await yld();
+    }
+  }
+
+  // Back-fill road-graph snap for new route nodes so escooter step can use Dijkstra
+  for (const n of nodes) {
+    if (n.segAKey == null) {
+      const snap = snapToRoad(n.lng, n.lat);
+      if (snap) { n.segAKey = snap.segAKey; n.segBKey = snap.segBKey; }
+    }
+  }
+
+  refreshSources();
+  updateCounts();
+  document.getElementById('btn-save-map').disabled = false;
+  setStatus(`${mode} done — ${nodes.length} nodes, ${edges.length} edges`);
+}
+
+// Split a [[lng,lat],...] polyline into segments of approximately stepM metres.
+// jitter ∈ [0,1]: fraction by which each threshold is randomly varied (0 = uniform).
+// Returns [{from, to, coords}] where coords are all intermediate points.
+function splitLineAtInterval(coords, stepM, jitter = 0) {
+  if (coords.length < 2) return [];
+  const segs = [];
+  let segCoords   = [coords[0]];
+  let accumulated = 0;
+  const nextThreshold = () =>
+    jitter > 0 ? stepM * (1 - jitter + Math.random() * jitter * 2) : stepM;
+  let threshold = nextThreshold();
+
+  for (let i = 1; i < coords.length; i++) {
+    const a   = coords[i - 1];
+    const b   = coords[i];
+    const len = haversine(a, b);
+    if (len < 0.01) continue;
+
+    let cursor = a;
+    let rem    = len;
+
+    while (accumulated + rem >= threshold) {
+      const need = threshold - accumulated;
+      const t    = need / rem;
+      const pt   = [cursor[0] + t * (b[0] - cursor[0]), cursor[1] + t * (b[1] - cursor[1])];
+
+      segCoords.push(pt);
+      segs.push({ from: segCoords[0], to: pt, coords: [...segCoords] });
+      segCoords   = [pt];
+      cursor      = pt;
+      rem        -= need;
+      accumulated = 0;
+      threshold   = nextThreshold();
+    }
+
+    accumulated += rem;
+    segCoords.push(b);
+  }
+
+  // Trailing segment to end of line
+  if (segs.length > 0 && segCoords.length >= 2 &&
+      haversine(segCoords[0], segCoords[segCoords.length - 1]) > 30) {
+    segs.push({ from: segCoords[0], to: segCoords[segCoords.length - 1], coords: [...segCoords] });
+  }
+
+  return segs;
+}
+
+// BFS over train-pass nodes; connects each disconnected component to the
+// nearest node in the merged (main) component. Returns number of bridges added.
+function connectTrainComponents(nodeIdBefore) {
+  const nodeMap  = new Map(nodes.map(n => [n.id, n]));
+  const trainIds = new Set(nodes.filter(n => n.id >= nodeIdBefore).map(n => n.id));
+  if (trainIds.size === 0) return 0;
+
+  // Adjacency restricted to train nodes and train edges
+  const adj = new Map([...trainIds].map(id => [id, []]));
+  for (const e of edges) {
+    if (!e.modes.includes('TRAIN')) continue;
+    if (adj.has(e.from) && adj.has(e.to)) {
+      adj.get(e.from).push(e.to);
+      adj.get(e.to).push(e.from);
+    }
+  }
+
+  // Find connected components via BFS
+  const visited    = new Set();
+  const components = [];
+  for (const id of trainIds) {
+    if (visited.has(id)) continue;
+    const comp = [];
+    const q    = [id];
+    visited.add(id);
+    while (q.length) {
+      const cur = q.shift();
+      comp.push(cur);
+      for (const nb of (adj.get(cur) ?? [])) {
+        if (!visited.has(nb)) { visited.add(nb); q.push(nb); }
+      }
+    }
+    components.push(comp);
+  }
+
+  if (components.length <= 1) return 0;
+
+  // Greedily bridge each smaller component to the growing merged set.
+  // Components within MAX_BRIDGE_M are bridged; farther ones are dropped as OSM strays.
+  // No exception for "large" components — the topological sort in genTrain should have
+  // already ensured real lines are connected by shared endpoints, not long bridges.
+  components.sort((a, b) => b.length - a.length);
+  const merged = new Set(components[0]);
+  let bridges  = 0;
+
+  for (let ci = 1; ci < components.length; ci++) {
+    let bestD = Infinity, bestFrom = null, bestTo = null;
+    for (const fromId of components[ci]) {
+      const fn = nodeMap.get(fromId);
+      for (const toId of merged) {
+        const tn = nodeMap.get(toId);
+        const d  = haversine([fn.lng, fn.lat], [tn.lng, tn.lat]);
+        if (d < bestD) { bestD = d; bestFrom = fromId; bestTo = toId; }
+      }
+    }
+
+    if (bestFrom !== null && bestD <= MAX_BRIDGE_M) {
+      const fn = nodeMap.get(bestFrom);
+      const tn = nodeMap.get(bestTo);
+      edges.push({ id: nextEdgeId++, from: bestFrom, to: bestTo,
+                   modes: ['TRAIN'], coordinates: [[fn.lng, fn.lat], [tn.lng, tn.lat]] });
+      for (const id of components[ci]) merged.add(id);
+      bridges++;
+    } else {
+      // Fragment too far from the main network — drop it
+      const drop = new Set(components[ci]);
+      nodes = nodes.filter(n => !drop.has(n.id));
+      edges = edges.filter(e => !drop.has(e.from) && !drop.has(e.to));
+      for (const id of drop) nodeMap.delete(id);
+    }
+  }
+
+  return bridges;
+}
+
+// Return an existing node within MERGE_RADIUS_M, or create a new snapped one.
+function upsertNode(coord) {
+  const [lng, lat] = coord;
+  for (const n of nodes) {
+    if (haversine([n.lng, n.lat], [lng, lat]) <= MERGE_RADIUS_M) return n;
+  }
+  const snap = snapToRoad(lng, lat);
+  const id   = nextNodeId++;
+  const node = {
+    id,
+    lng: snap ? snap.lng : lng,
+    lat: snap ? snap.lat : lat,
+    label: String(id),
+    segAKey: snap?.segAKey ?? null,
+    segBKey: snap?.segBKey ?? null,
+    _new: true,
+  };
+  nodes.push(node);
+  return node;
+}
+
+const yld = () => new Promise(r => setTimeout(r, 0));
+
+// ══════════════════════════════════════════════════════════
 //  UI HELPERS
 // ══════════════════════════════════════════════════════════
 
@@ -875,7 +1528,14 @@ function updateCounts() {
 
 document.getElementById('btn-load-map').addEventListener('click', () => document.getElementById('file-map').click());
 document.getElementById('btn-save-map').addEventListener('click', saveMap);
+document.getElementById('btn-undo').addEventListener('click', undo);
 document.getElementById('btn-auto-gen').addEventListener('click', autoGenerate);
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+});
+document.getElementById('btn-gen-train').addEventListener('click', genTrain);
+document.getElementById('btn-gen-bus').addEventListener('click', genBus);
+document.getElementById('btn-gen-escooter').addEventListener('click', genEscooter);
 
 document.getElementById('file-map').addEventListener('change', e => {
   if (e.target.files[0]) loadMapFile(e.target.files[0]);
