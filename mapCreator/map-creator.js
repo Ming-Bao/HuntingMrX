@@ -410,10 +410,24 @@ function nodesGJ() {
 function edgesGJ() {
   const SPACING = 4.5;
   const features = [];
+
+  // Collect every (edge, mode) pair grouped by node-pair so that
+  // separate edge objects between the same two nodes are offset together.
+  // pairMap key: "smallerId-largerId"
+  const pairMap = new Map();
   for (const e of edges) {
     const modes = e.modes.length ? e.modes : ['BUS'];
-    const n = modes.length;
-    modes.forEach((mode, i) => {
+    const key = `${Math.min(e.from, e.to)}-${Math.max(e.from, e.to)}`;
+    if (!pairMap.has(key)) pairMap.set(key, []);
+    for (const mode of modes) pairMap.get(key).push({ e, mode });
+  }
+
+  // Sort each group by canonical mode order so the layout is deterministic
+  const modeRank = m => MODE_ORDER.indexOf(m);
+  for (const items of pairMap.values()) {
+    items.sort((a, b) => modeRank(a.mode) - modeRank(b.mode));
+    const n = items.length;
+    items.forEach(({ e, mode }, i) => {
       features.push({
         type: 'Feature',
         properties: { id: e.id, mode, lineOffset: n === 1 ? 0 : (i - (n - 1) / 2) * SPACING },
@@ -421,6 +435,7 @@ function edgesGJ() {
       });
     });
   }
+
   return { type: 'FeatureCollection', features };
 }
 
@@ -1019,30 +1034,19 @@ function deduplicateParallelWays(lines, radiusM = 80) {
 
 async function genTrain() {
   if (!graphAdj.size) { setStatus('Road graph not ready'); return; }
+  if (typeof WELLINGTON_TRAIN_LINES === 'undefined') {
+    setStatus('wellington-train-stops.js not loaded'); return;
+  }
   saveUndo();
   const btn = document.getElementById('btn-gen-train');
   btn.disabled = true;
   clearModeEdges('TRAIN');
 
-  // Snap radius: way endpoints within this distance merge to an existing node.
-  // Handles junctions where multiple lines share a station and short tail segments.
-  const JOIN_R = 300;
-
-  const TARGET_NODES = 50;
-  const segs = WELLINGTON_TRAINS.filter(s => s.some(inTrainGameArea));
-
-  // Compute step size so the total track length yields ~TARGET_NODES interval nodes
-  let totalLen = 0;
-  for (const s of segs) for (let i = 1; i < s.length; i++) totalLen += haversine(s[i-1], s[i]);
-  const stepM = totalLen / TARGET_NODES;
-
-  setStatus(`Placing ~${TARGET_NODES} train nodes (step ${Math.round(stepM)}m across ${Math.round(totalLen/1000)}km)…`);
+  setStatus('Placing train nodes at actual station positions…');
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
   function addTrainNode(lng, lat) {
-    // Keep node at the track position but store nearest road seg keys so that
-    // findRoadPath works when the user manually drags an edge from this node.
     const snap = snapToRoad(lng, lat);
     const n = { id: nextNodeId++, lng, lat, label: String(nextNodeId - 1),
                 segAKey: snap?.segAKey ?? null, segBKey: snap?.segBKey ?? null };
@@ -1050,8 +1054,7 @@ async function genTrain() {
     return n;
   }
 
-  // Nearest node within radiusM, or null
-  function nearest(coord, radiusM) {
+  function nearestTrain(coord, radiusM) {
     let best = null, bestD = radiusM;
     for (const n of nodes) {
       const d = haversine([n.lng, n.lat], coord);
@@ -1060,82 +1063,35 @@ async function genTrain() {
     return best;
   }
 
-  // Coordinate at distM metres along a polyline
-  function ptAt(coords, distM) {
-    let acc = 0;
-    for (let i = 1; i < coords.length; i++) {
-      const seg = haversine(coords[i - 1], coords[i]);
-      if (acc + seg >= distM) {
-        const t = (distM - acc) / seg;
-        return [coords[i-1][0] + t*(coords[i][0]-coords[i-1][0]),
-                coords[i-1][1] + t*(coords[i][1]-coords[i-1][1])];
-      }
-      acc += seg;
-    }
-    return coords[coords.length - 1];
-  }
-
-  // Sub-array of coordinates between d0 and d1 metres along the polyline
-  function sliceLine(coords, d0, d1) {
-    const out = [ptAt(coords, d0)];
-    let acc = 0;
-    for (let i = 1; i < coords.length; i++) {
-      const a = coords[i - 1], b = coords[i];
-      const seg = haversine(a, b), end = acc + seg;
-      if (end > d0 && acc < d1) {
-        if (end <= d1) out.push(b);
-        else {
-          const t = (d1 - acc) / seg;
-          out.push([a[0] + t*(b[0]-a[0]), a[1] + t*(b[1]-a[1])]);
-        }
-      }
-      acc = end;
-      if (acc >= d1) break;
-    }
-    return out;
-  }
-
-  function tryAddEdge(from, to, coords) {
+  function tryAddTrainEdge(from, to) {
     if (from.id === to.id) return;
     if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return;
-    // Snap edge endpoints to the actual node positions so no visual gap appears
-    const c = [[from.lng, from.lat], ...coords.slice(1, -1), [to.lng, to.lat]];
-    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['TRAIN'], coordinates: c });
+    // Use road routing for draggable connectivity; fall back to straight line for
+    // tunnels (Johnsonville) and cross-mountain routes (Wairarapa).
+    const straight = [[from.lng, from.lat], [to.lng, to.lat]];
+    const dist = haversine([from.lng, from.lat], [to.lng, to.lat]);
+    let coords = straight;
+    if (from.segAKey && to.segAKey) {
+      const routed = findRoadPath(from, to, dist * 3);
+      if (routed.length > 2) coords = routed;
+    }
+    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['TRAIN'], coordinates: coords });
   }
 
-  // ── walk each way ──────────────────────────────────────────────────────────
+  // ── place one node per station, connect consecutive stops per line ──────────
 
-  let done = 0;
-  for (const way of segs) {
-    let wayLen = 0;
-    for (let i = 1; i < way.length; i++) wayLen += haversine(way[i - 1], way[i]);
-    if (wayLen < 50) continue;
-
-    // Start node: snap to an existing nearby node or create one at the way start
-    let from = nearest(way[0], JOIN_R) ?? addTrainNode(way[0][0], way[0][1]);
-    let d = 0;
-
-    // Place a node every stepM and connect with a route-geometry edge
-    while (d + stepM < wayLen) {
-      const d0 = d;
-      d += stepM;
-      const pt = ptAt(way, d);
-      const to = nearest(pt, MERGE_RADIUS_M) ?? addTrainNode(pt[0], pt[1]);
-      tryAddEdge(from, to, sliceLine(way, d0, d));
-      from = to;
+  for (let li = 0; li < WELLINGTON_TRAIN_LINES.length; li++) {
+    const line = WELLINGTON_TRAIN_LINES[li];
+    let prev = null;
+    for (const coord of line) {
+      // Merge stations shared across lines (e.g. Wellington Station, Petone)
+      const node = nearestTrain(coord, MERGE_RADIUS_M) ?? addTrainNode(coord[0], coord[1]);
+      if (prev) tryAddTrainEdge(prev, node);
+      prev = node;
     }
-
-    // Tail segment: snap the way end to a nearby node (absorbs micro-tails)
-    // or create a new node, then connect
-    const endNode = nearest(way[way.length - 1], JOIN_R) ??
-                    addTrainNode(way[way.length-1][0], way[way.length-1][1]);
-    tryAddEdge(from, endNode, sliceLine(way, d, wayLen));
-
-    if (++done % 10 === 0) {
-      refreshSources(); updateCounts();
-      setStatus(`Train: ${done}/${segs.length} segments…`);
-      await yld();
-    }
+    setStatus(`Train: line ${li + 1}/${WELLINGTON_TRAIN_LINES.length}…`);
+    refreshSources(); updateCounts();
+    await yld();
   }
 
   refreshSources();
