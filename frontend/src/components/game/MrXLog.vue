@@ -3,9 +3,16 @@
     <p class="section-label">Mr X Log</p>
     <div v-if="log.length === 0" class="log-empty">No moves yet</div>
     <div v-for="(entry, i) in log" :key="i" class="log-row">
-      <span class="log-round">R{{ entry.round }}<span v-if="entry.leg === 2" class="log-leg">b</span></span>
-      <span class="log-ticket" :style="{ color: modeColor(entry.ticketUsed) }">{{ modeLabel(entry.ticketUsed) }}</span>
-      <span class="log-node">{{ entry.nodeId ?? '?' }}</span>
+      <span class="log-round">
+        R{{ entry.round }}<span v-if="entry.leg === 2" class="log-leg">b</span>
+      </span>
+      <span class="log-chips">
+        <span v-if="entry.doubleMove" class="mode-chip chip-double">DOUBLE</span>
+        <span class="mode-chip" :style="{ backgroundColor: modeColor(entry.ticketUsed) }">
+          {{ modeLabel(entry.ticketUsed) }}
+        </span>
+        <span v-if="entry.nodeId != null" class="node-chip">{{ entry.nodeId }}</span>
+      </span>
     </div>
   </div>
 </template>
@@ -31,18 +38,24 @@ defineProps<{ log: MrXLogEntry[] }>()
   @apply text-sm text-gray-600 italic;
 }
 .log-row {
-  @apply flex items-center justify-between py-1.5;
+  @apply flex items-center justify-between py-1.5 px-1;
 }
 .log-round {
-  @apply text-sm text-gray-500;
-}
-.log-ticket {
-  @apply text-sm font-medium;
+  @apply text-sm text-gray-500 font-mono;
 }
 .log-leg {
   @apply text-gray-400 ml-0.5;
 }
-.log-node {
-  @apply text-sm text-gray-500 dark:text-gray-400 font-mono;
+.log-chips {
+  @apply flex gap-1 flex-wrap justify-end items-center;
+}
+.mode-chip {
+  @apply text-xs text-white font-medium px-1.5 py-0.5 rounded;
+}
+.chip-double {
+  @apply bg-amber-500;
+}
+.node-chip {
+  @apply text-xs text-gray-400 dark:text-gray-500 font-mono ml-1;
 }
 </style>

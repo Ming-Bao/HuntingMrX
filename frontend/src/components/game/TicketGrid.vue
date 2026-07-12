@@ -4,7 +4,7 @@
     <div class="ticket-grid">
       <div v-for="ticket in tickets" :key="ticket.type" class="ticket-pill">
         <span class="ticket-name" :style="{ color: ticket.color }">{{ ticket.label }}</span>
-        <span class="ticket-count">{{ ticket.count }}</span>
+        <span class="ticket-count">{{ ticket.count < 0 ? '∞' : ticket.count }}</span>
       </div>
     </div>
   </div>

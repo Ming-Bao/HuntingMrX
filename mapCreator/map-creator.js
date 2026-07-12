@@ -196,14 +196,17 @@ function snapToRoad(lng, lat) {
   return nearest;
 }
 
-// Returns the graphAdj vertex key closest to (lng, lat) by finding the nearest
-// road segment (via the spatial index) then picking whichever endpoint is closer.
+// Scans every road-graph vertex and returns the key of the closest one.
+// Uses a latitude-corrected squared-degree metric (no trig in the inner loop).
 function nearestRoadVertex(lng, lat) {
-  const snap = snapToRoad(lng, lat);
-  if (!snap) return null;
-  const dA = haversine([lng, lat], coordFromKey(snap.segAKey));
-  const dB = haversine([lng, lat], coordFromKey(snap.segBKey));
-  return dA <= dB ? snap.segAKey : snap.segBKey;
+  const cosLat = Math.cos(lat * Math.PI / 180);
+  let bestKey = null, bestDsq = Infinity;
+  for (const key of graphAdj.keys()) {
+    const c = coordFromKey(key);
+    const dsq = ((c[0] - lng) * cosLat) ** 2 + (c[1] - lat) ** 2;
+    if (dsq < bestDsq) { bestDsq = dsq; bestKey = key; }
+  }
+  return bestKey;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -255,8 +258,8 @@ function findRoadPath(fromNode, toNode, maxDist = Infinity) {
   }
 
   const srcPt = [fromNode.lng, fromNode.lat];
-  init(fromNode.segAKey, srcPt);
-  if (fromNode.segBKey !== fromNode.segAKey) init(fromNode.segBKey, srcPt);
+  if (fromNode.segAKey) init(fromNode.segAKey, srcPt);
+  if (fromNode.segBKey && fromNode.segBKey !== fromNode.segAKey) init(fromNode.segBKey, srcPt);
 
   while (heap.length > 0) {
     const [d, u] = heapPop(heap);
@@ -273,8 +276,8 @@ function findRoadPath(fromNode, toNode, maxDist = Infinity) {
   }
 
   const tgtPt = [toNode.lng, toNode.lat];
-  const costA  = (dist.get(toNode.segAKey) ?? Infinity) + haversine(coordFromKey(toNode.segAKey), tgtPt);
-  const costB  = (dist.get(toNode.segBKey) ?? Infinity) + haversine(coordFromKey(toNode.segBKey), tgtPt);
+  const costA  = toNode.segAKey ? (dist.get(toNode.segAKey) ?? Infinity) + haversine(coordFromKey(toNode.segAKey), tgtPt) : Infinity;
+  const costB  = toNode.segBKey ? (dist.get(toNode.segBKey) ?? Infinity) + haversine(coordFromKey(toNode.segBKey), tgtPt) : Infinity;
 
   if (costA === Infinity && costB === Infinity) return [srcPt, tgtPt];
 
@@ -401,37 +404,28 @@ function addEdge(fromId, toId) {
 
   let coordinates;
 
-  if (!roadData) {
+  // Straight line only when exactly one end is a train node (train↔road mix).
+  // Train↔train uses road geometry; road↔road always uses road geometry.
+  const mixedTrainRoad = (from.offRoad && !to.offRoad) || (!from.offRoad && to.offRoad);
+  if (!roadData || !graphAdj.size || mixedTrainRoad) {
     coordinates = [[from.lng, from.lat], [to.lng, to.lat]];
-  } else if (from.offRoad || to.offRoad) {
-    // Off-road nodes (train stations) need a straight stub to the nearest road
-    // vertex first, then normal Dijkstra between those road entry/exit points.
-    function roadProxy(node) {
-      const vKey = nearestRoadVertex(node.lng, node.lat) ?? node.segAKey;
-      if (!vKey) return null;
-      const [lng, lat] = coordFromKey(vKey);
-      return { lng, lat, segAKey: vKey, segBKey: vKey };
-    }
-
-    const fp = from.offRoad ? roadProxy(from) : from;
-    const tp = to.offRoad   ? roadProxy(to)   : to;
-
-    if (fp && tp) {
-      const road = findRoadPath(fp, tp);
-      // road = [fpCoord, ...verts, tpCoord]
-      // Sandwich the actual station positions around the road path.
-      const pts = [...road];
-      if (from.offRoad) pts.unshift([from.lng, from.lat]);
-      if (to.offRoad)   pts.push([to.lng, to.lat]);
-      // Remove any adjacent duplicates that arise when station ≈ road vertex
-      coordinates = pts.filter((p, i) => i === 0 || p[0] !== pts[i-1][0] || p[1] !== pts[i-1][1]);
-    } else {
-      coordinates = [[from.lng, from.lat], [to.lng, to.lat]];
-    }
   } else {
-    coordinates = (from.segAKey && to.segAKey)
-      ? findRoadPath(from, to)
-      : [[from.lng, from.lat], [to.lng, to.lat]];
+    const fromSnap = snapToRoad(from.lng, from.lat);
+    const toSnap   = snapToRoad(to.lng,   to.lat);
+
+    if (!fromSnap || !toSnap) {
+      coordinates = [[from.lng, from.lat], [to.lng, to.lat]];
+    } else {
+      const road = findRoadPath(fromSnap, toSnap);
+      const pts  = [...road];
+
+      if (haversine([from.lng, from.lat], [fromSnap.lng, fromSnap.lat]) > 5)
+        pts.unshift([from.lng, from.lat]);
+      if (haversine([to.lng, to.lat], [toSnap.lng, toSnap.lat]) > 5)
+        pts.push([to.lng, to.lat]);
+
+      coordinates = pts.filter((p, i) => i === 0 || p[0] !== pts[i-1][0] || p[1] !== pts[i-1][1]);
+    }
   }
 
   edges.push({ id: nextEdgeId++, from: fromId, to: toId, modes: [...activeModes], coordinates });
@@ -1141,15 +1135,10 @@ async function genTrain() {
   function tryAddTrainEdge(from, to) {
     if (from.id === to.id) return;
     if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return;
-    // Use road routing for draggable connectivity; fall back to straight line for
-    // tunnels (Johnsonville) and cross-mountain routes (Wairarapa).
-    const straight = [[from.lng, from.lat], [to.lng, to.lat]];
+    if (!from.segAKey || !to.segAKey) return;
     const dist = haversine([from.lng, from.lat], [to.lng, to.lat]);
-    let coords = straight;
-    if (from.segAKey && to.segAKey) {
-      const routed = findRoadPath(from, to, dist * 3);
-      if (routed.length > 2) coords = routed;
-    }
+    const coords = findRoadPath(from, to, dist * 3);
+    if (coords.length <= 2) return; // no road path found, skip beeline
     edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['TRAIN'], coordinates: coords });
   }
 
@@ -1211,6 +1200,7 @@ async function genBus() {
     if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return false;
     const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
     const coords = findRoadPath(from, to, d * 5);
+    if (coords.length <= 2) return false; // no road path found, skip beeline
     edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['BUS'], coordinates: coords });
     return true;
   }
@@ -1253,6 +1243,35 @@ async function genBus() {
         .sort((a, b) => haversine([from.lng, from.lat], [a.lng, a.lat])
                       - haversine([from.lng, from.lat], [b.lng, b.lat]));
       for (const to of sorted.slice(0, 2)) addBusEdge(from, to);
+    }
+
+    // Enforce minimum degree of 2: keep trying further neighbours, then drop
+    // nodes that still can't reach 2 routable connections.
+    {
+      const deg = new Map(cluster.map(n => [n.id, 0]));
+      for (const e of edges) {
+        if (!e.modes.includes('BUS')) continue;
+        if (deg.has(e.from)) deg.set(e.from, deg.get(e.from) + 1);
+        if (deg.has(e.to))   deg.set(e.to,   deg.get(e.to)   + 1);
+      }
+      const byDist = new Map(cluster.map(n => [n.id,
+        cluster.filter(o => o.id !== n.id)
+               .sort((a, b) => haversine([n.lng, n.lat], [a.lng, a.lat])
+                             - haversine([n.lng, n.lat], [b.lng, b.lat]))]));
+      for (const n of cluster) {
+        for (const cand of byDist.get(n.id)) {
+          if (deg.get(n.id) >= 2) break;
+          if (addBusEdge(n, cand)) {
+            deg.set(n.id,    deg.get(n.id)    + 1);
+            deg.set(cand.id, (deg.get(cand.id) ?? 0) + 1);
+          }
+        }
+      }
+      const orphans = new Set(cluster.filter(n => deg.get(n.id) < 2).map(n => n.id));
+      if (orphans.size) {
+        edges = edges.filter(e => !orphans.has(e.from) && !orphans.has(e.to));
+        nodes = nodes.filter(n => !orphans.has(n.id));
+      }
     }
 
     refreshSources(); updateCounts();
@@ -1307,11 +1326,13 @@ async function genEscooter() {
   }
 
   function addEscooterEdge(from, to) {
-    if (from.id === to.id) return;
-    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return;
+    if (from.id === to.id) return false;
+    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return false;
     const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
     const coords = findRoadPath(from, to, d * 5);
+    if (coords.length <= 2) return false; // no road path found, skip beeline
     edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['ESCOOTER'], coordinates: coords });
+    return true;
   }
 
   for (const cl of CLUSTERS) {
@@ -1349,6 +1370,35 @@ async function genEscooter() {
         .sort((a, b) => haversine([from.lng, from.lat], [a.lng, a.lat])
                       - haversine([from.lng, from.lat], [b.lng, b.lat]));
       for (const to of sorted.slice(0, 3)) addEscooterEdge(from, to);
+    }
+
+    // Enforce minimum degree of 2: keep trying further neighbours, then drop
+    // nodes that still can't reach 2 routable connections.
+    {
+      const deg = new Map(cluster.map(n => [n.id, 0]));
+      for (const e of edges) {
+        if (!e.modes.includes('ESCOOTER')) continue;
+        if (deg.has(e.from)) deg.set(e.from, deg.get(e.from) + 1);
+        if (deg.has(e.to))   deg.set(e.to,   deg.get(e.to)   + 1);
+      }
+      const byDist = new Map(cluster.map(n => [n.id,
+        cluster.filter(o => o.id !== n.id)
+               .sort((a, b) => haversine([n.lng, n.lat], [a.lng, a.lat])
+                             - haversine([n.lng, n.lat], [b.lng, b.lat]))]));
+      for (const n of cluster) {
+        for (const cand of byDist.get(n.id)) {
+          if (deg.get(n.id) >= 2) break;
+          if (addEscooterEdge(n, cand)) {
+            deg.set(n.id,    deg.get(n.id)    + 1);
+            deg.set(cand.id, (deg.get(cand.id) ?? 0) + 1);
+          }
+        }
+      }
+      const orphans = new Set(cluster.filter(n => deg.get(n.id) < 2).map(n => n.id));
+      if (orphans.size) {
+        edges = edges.filter(e => !orphans.has(e.from) && !orphans.has(e.to));
+        nodes = nodes.filter(n => !orphans.has(n.id));
+      }
     }
 
     refreshSources(); updateCounts();

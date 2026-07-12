@@ -21,6 +21,7 @@ public class GameSession {
     private List<MrXLogEntry> mrXLog = new ArrayList<>();
     private boolean mrXDoubleMovePending;
     private int currentDetectiveIndex;
+    private long turnStartedAt; // epoch millis; reset each time the active player changes
 
     public GameSession() {}
 
@@ -65,6 +66,9 @@ public class GameSession {
 
     public int getCurrentDetectiveIndex()             { return currentDetectiveIndex; }
     public void setCurrentDetectiveIndex(int idx)     { this.currentDetectiveIndex = idx; }
+
+    public long getTurnStartedAt()                    { return turnStartedAt; }
+    public void setTurnStartedAt(long t)              { this.turnStartedAt = t; }
 
     // Convenience helpers
 

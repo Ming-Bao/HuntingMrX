@@ -65,7 +65,7 @@ button.active  { background: #1d4ed8; border-color: #3b82f6; }
   margin-left: auto;
   font-size: 11px;
   color: #9ca3af;
-  max-width: 300px;
+  max-width: 480px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

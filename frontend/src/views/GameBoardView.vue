@@ -44,8 +44,16 @@
         :is-my-turn="store.isMyTurn"
         :submitting="submitting"
         :move-error="moveError"
+        :valid-moves="store.validMoves"
+        :nodes="nodes"
+        :double-mode="doubleMode"
+        :has-double-ticket="hasDoubleTicket"
+        :mr-x-double-move-pending="mrXDoubleMovePending"
         @select-ticket="selectedTicket = $event"
         @confirm-move="confirmMove"
+        @select-node="handleSelectNode"
+        @declare-double="doubleMode = true"
+        @cancel-double="doubleMode = false"
         @leave="handleLeave"
       />
     </div>
@@ -83,6 +91,7 @@ const selectedNode   = ref<GraphNode | null>(null)
 const selectedTicket = ref<string | null>(null)
 const submitting     = ref(false)
 const moveError      = ref<string | null>(null)
+const doubleMode     = ref(false)
 
 // ── Derived state ─────────────────────────────────────────────────────────────
 
@@ -121,6 +130,14 @@ const displayPlayers = computed<DemoPlayer[]>(() => {
       return { name: p.name, isYou: isMe, role: 'DETECTIVE', node: p.nodeId, color }
     }
   })
+})
+
+const mrXDoubleMovePending = computed(() => gameState.value?.mrXDoubleMovePending ?? false)
+
+const hasDoubleTicket = computed(() => {
+  if (store.myRole !== 'MR_X') return false
+  const count = store.myPlayer?.tickets?.DOUBLE ?? 0
+  return count !== 0
 })
 
 const myTickets = computed<DemoTicket[]>(() => {
@@ -224,6 +241,11 @@ onUnmounted(() => {
   stompClient?.deactivate()
 })
 
+// Clear double mode if the turn moves away from us
+watch(() => store.isMyTurn, (nowMyTurn) => {
+  if (!nowMyTurn) doubleMode.value = false
+})
+
 // Also fetch valid moves when the store says it becomes our turn
 // (handles cases where the WebSocket push arrived before we subscribed)
 watch(
@@ -250,13 +272,16 @@ function handleSelectNode(node: GraphNode | null) {
 
 async function confirmMove() {
   if (!selectedNode.value || !selectedTicket.value || !store.playerId || !gameId.value) return
+  const nodeId = selectedNode.value.id
+  const ticket = doubleMode.value ? `DOUBLE_${selectedTicket.value}` : selectedTicket.value
   submitting.value = true
   moveError.value = null
+  selectedNode.value = null
+  selectedTicket.value = null
+  doubleMode.value = false
+  store.setValidMoves([])
   try {
-    await submitMove(gameId.value, store.playerId, selectedNode.value.id, selectedTicket.value)
-    selectedNode.value = null
-    selectedTicket.value = null
-    store.setValidMoves([])
+    await submitMove(gameId.value, store.playerId, nodeId, ticket)
   } catch (e) {
     moveError.value = e instanceof Error ? e.message : 'Move failed'
   } finally {

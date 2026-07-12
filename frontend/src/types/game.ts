@@ -23,8 +23,9 @@ export interface PlayerDTO {
 export interface MrXLogEntry {
   round: number
   leg: number
-  ticketUsed: TicketType
+  ticketUsed: string
   nodeId: number | null
+  doubleMove: boolean
 }
 
 export interface GameStateDTO {

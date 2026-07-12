@@ -108,12 +108,6 @@ public class MapGraph {
 
             if (opts.isEmpty()) continue; // can't reach this node at all
 
-            // Mr X: DOUBLE can initiate a double move from any reachable destination
-            if (isMrX && !doubleMovePending) {
-                int dbl = tickets.getOrDefault(TicketType.DOUBLE, 0);
-                if (dbl > 0) opts.add("DOUBLE");
-            }
-
             result.add(new ValidMoveDTO(edge.to(), new ArrayList<>(opts)));
         }
 

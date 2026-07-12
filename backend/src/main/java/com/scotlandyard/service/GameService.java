@@ -8,6 +8,7 @@ import com.scotlandyard.model.*;
 import com.scotlandyard.repository.GameRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
@@ -20,6 +21,7 @@ public class GameService {
     private static final String JOIN_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final int JOIN_CODE_LENGTH = 6;
     private static final Set<Integer> REVEAL_ROUNDS = Set.of(3, 8, 13, 18, 24);
+    private static final long TURN_TIMEOUT_MS = 15 * 60 * 1000L;
 
     private final SecureRandom random = new SecureRandom();
 
@@ -135,6 +137,7 @@ public class GameService {
         session.setTurnPhase(TurnPhase.MR_X_TURN);
         session.setCurrentPlayerId(session.getMrX().getId());
         session.setCurrentDetectiveIndex(0);
+        resetTurnTimer(session);
 
         gameRepository.save(session);
 
@@ -214,14 +217,25 @@ public class GameService {
             if (!playerId.equals(session.getCurrentPlayerId()))
                 throw new ForbiddenException("Not your turn");
 
+            // Ticket may be "DOUBLE_BUS", "DOUBLE_ESCOOTER", etc. for the first leg
+            // of a double move — the prefix carries the DOUBLE card and the suffix
+            // carries the transport used on that leg.
             TicketType ticket;
-            try { ticket = TicketType.valueOf(ticketStr); }
-            catch (IllegalArgumentException e) { throw new IllegalArgumentException("Unknown ticket: " + ticketStr); }
+            TicketType doubleTransport = null;
+            if (ticketStr.startsWith("DOUBLE_")) {
+                ticket = TicketType.DOUBLE;
+                String transportStr = ticketStr.substring(7);
+                try { doubleTransport = TicketType.valueOf(transportStr); }
+                catch (IllegalArgumentException e) { throw new IllegalArgumentException("Unknown ticket: " + ticketStr); }
+            } else {
+                try { ticket = TicketType.valueOf(ticketStr); }
+                catch (IllegalArgumentException e) { throw new IllegalArgumentException("Unknown ticket: " + ticketStr); }
+            }
 
             Player player = findPlayer(session, playerId);
 
             if (player instanceof MrXPlayer mrX) {
-                applyMrXMove(session, mrX, toNodeId, ticket);
+                applyMrXMove(session, mrX, toNodeId, ticket, doubleTransport);
             } else {
                 applyDetectiveMove(session, (DetectivePlayer) player, toNodeId, ticket);
             }
@@ -235,7 +249,8 @@ public class GameService {
 
     // ── Move application ─────────────────────────────────────────────────────
 
-    private void applyMrXMove(GameSession session, MrXPlayer mrX, int toNodeId, TicketType ticket) {
+    private void applyMrXMove(GameSession session, MrXPlayer mrX, int toNodeId,
+                              TicketType ticket, TicketType doubleTransport) {
         Set<Integer> detectiveNodes = detectiveNodeIds(session);
 
         if (detectiveNodes.contains(toNodeId))
@@ -245,30 +260,34 @@ public class GameService {
         boolean doubleSecondLeg = session.isMrXDoubleMovePending();
 
         if (doubleFirstLeg) {
-            // DOUBLE first leg: any adjacent node, deduct DOUBLE ticket
-            if (!mapGraph.isAdjacent(mrX.getNodeId(), toNodeId))
-                throw new IllegalArgumentException("Node is not adjacent");
+            // Validate + deduct the transport ticket for this leg, then the DOUBLE card.
+            if (doubleTransport != null) {
+                validateAndDeductTicket(mrX, toNodeId, doubleTransport);
+            } else {
+                if (!mapGraph.isAdjacent(mrX.getNodeId(), toNodeId))
+                    throw new IllegalArgumentException("Node is not adjacent");
+            }
             mrX.useTicket(TicketType.DOUBLE);
         } else {
-            // Normal move or double second leg: must match edge modes (or use BLACK on any edge)
             validateAndDeductTicket(mrX, toNodeId, ticket);
         }
 
         mrX.setNodeId(toNodeId);
 
-        // Log entry
         boolean revealRound = REVEAL_ROUNDS.contains(session.getRound());
         int leg = doubleFirstLeg ? 1 : (doubleSecondLeg ? 2 : 1);
         boolean finalLeg = !doubleFirstLeg;
         Integer revealedNode = (revealRound && finalLeg) ? toNodeId : null;
-        session.getMrXLog().add(new MrXLogEntry(session.getRound(), leg, ticket, revealedNode));
+        // Log the actual transport used; mark first leg with doubleMove=true so the
+        // frontend can display a ×2 indicator alongside the ticket type.
+        TicketType logTicket = (doubleFirstLeg && doubleTransport != null) ? doubleTransport : ticket;
+        session.getMrXLog().add(new MrXLogEntry(session.getRound(), leg, logTicket, revealedNode, doubleFirstLeg));
 
         if (doubleFirstLeg) {
-            // Stay in MR_X_TURN for the second leg
             session.setMrXDoubleMovePending(true);
+            resetTurnTimer(session);
             pushValidMoves(session, mrX.getId());
         } else {
-            // Turn complete — advance to detectives
             session.setMrXDoubleMovePending(false);
             advanceToDetectiveTurn(session);
         }
@@ -295,6 +314,7 @@ public class GameService {
         List<Player> detectives = session.getDetectives();
         session.setTurnPhase(TurnPhase.DETECTIVE_TURN);
         session.setCurrentDetectiveIndex(0);
+        resetTurnTimer(session);
         skipToNextDetectiveWithMoves(session, detectives, 0);
     }
 
@@ -311,6 +331,7 @@ public class GameService {
             if (!computeValidMoves(session, det).isEmpty()) {
                 session.setCurrentDetectiveIndex(i);
                 session.setCurrentPlayerId(det.getId());
+                resetTurnTimer(session);
                 pushValidMoves(session, det.getId());
                 return;
             }
@@ -330,6 +351,7 @@ public class GameService {
         session.setCurrentDetectiveIndex(0);
         MrXPlayer mrX = session.getMrX();
         session.setCurrentPlayerId(mrX.getId());
+        resetTurnTimer(session);
         pushValidMoves(session, mrX.getId());
     }
 
@@ -440,8 +462,35 @@ public class GameService {
         dto.setRound(e.getRound());
         dto.setLeg(e.getLeg());
         dto.setTicketUsed(e.getTicketUsed());
-        dto.setNodeId(e.getNodeId()); // already null on non-reveal rounds
+        dto.setNodeId(e.getNodeId());
+        dto.setDoubleMove(e.isDoubleMove());
         return dto;
+    }
+
+    // ── Turn timer ────────────────────────────────────────────────────────────
+
+    private void resetTurnTimer(GameSession session) {
+        session.setTurnStartedAt(System.currentTimeMillis());
+    }
+
+    /** Runs every 30 s and terminates any in-progress game whose current player
+     *  has not moved within TURN_TIMEOUT_MS (15 minutes). */
+    @Scheduled(fixedDelay = 30_000)
+    public void checkTurnTimers() {
+        long now = System.currentTimeMillis();
+        for (GameSession session : gameRepository.findAll()) {
+            if (session.getPhase() != GamePhase.IN_PROGRESS) continue;
+            long started = session.getTurnStartedAt();
+            if (started == 0 || now - started <= TURN_TIMEOUT_MS) continue;
+            synchronized (session) {
+                if (session.getPhase() != GamePhase.IN_PROGRESS) continue;
+                if (now - session.getTurnStartedAt() <= TURN_TIMEOUT_MS) continue;
+                session.setPhase(GamePhase.ENDED);
+                session.setAbortReason("A player exceeded the 15-minute turn limit");
+                gameRepository.save(session);
+                broadcastToAllPlayers(session);
+            }
+        }
     }
 
     // ── Broadcasting ──────────────────────────────────────────────────────────

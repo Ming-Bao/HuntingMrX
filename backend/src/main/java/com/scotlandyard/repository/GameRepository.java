@@ -27,4 +27,8 @@ public class GameRepository {
     public void delete(String id) {
         store.remove(id);
     }
+
+    public Iterable<GameSession> findAll() {
+        return store.values();
+    }
 }
