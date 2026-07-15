@@ -148,7 +148,7 @@ const myTickets = computed<DemoTicket[]>(() => {
     { type: 'BUS',      label: 'Bus',      color: MODE_COLORS.BUS },
     { type: 'TRAIN',    label: 'Train',    color: MODE_COLORS.TRAIN },
     { type: 'FERRY',    label: 'Ferry',    color: MODE_COLORS.FERRY },
-    { type: 'BLACK',    label: 'Black',    color: MODE_COLORS.BLACK },
+    { type: 'BLACK',    label: modeLabel('BLACK'), color: MODE_COLORS.BLACK },
     { type: 'DOUBLE',   label: 'Double',   color: '#f59e0b' },
   ]
   return order

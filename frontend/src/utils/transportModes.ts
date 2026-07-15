@@ -3,7 +3,7 @@ export const MODE_COLORS: Record<string, string> = {
   BUS:      '#ef4444',
   TRAIN:    '#8b5cf6',
   FERRY:    '#06b6d4',
-  BLACK:    '#f59e0b',
+  BLACK:    '#64748b',
 }
 
 const MODE_LABELS: Record<string, string> = {
@@ -11,7 +11,7 @@ const MODE_LABELS: Record<string, string> = {
   BUS:      'Bus',
   TRAIN:    'Train',
   FERRY:    'Ferry',
-  BLACK:    'Black',
+  BLACK:    'Invisible',
 }
 
 export function modeColor(mode: string): string {
