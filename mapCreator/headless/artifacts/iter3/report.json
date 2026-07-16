@@ -1,0 +1,102 @@
+{
+  "hard": {
+    "schema_nodes": {
+      "pass": true,
+      "detail": "191 nodes valid"
+    },
+    "schema_edges": {
+      "pass": true,
+      "detail": "285 edges valid"
+    },
+    "polyline_endpoints": {
+      "pass": true,
+      "detail": "all polylines end within 30 m of their nodes"
+    },
+    "size": {
+      "pass": true,
+      "detail": "191 nodes (want 180-200), 285 edges (want <=285)"
+    },
+    "connected": {
+      "pass": true,
+      "detail": "1 connected component(s)"
+    },
+    "min_degree": {
+      "pass": true,
+      "detail": "all nodes have degree >= 2"
+    },
+    "train_tier": {
+      "pass": true,
+      "detail": "32 TRAIN edges (want >=15), TRAIN subgraph has 1 component(s)"
+    },
+    "train_contestable": {
+      "pass": true,
+      "detail": "26/30 train nodes (87%) also reachable by BUS/ESCOOTER (want >=80%)"
+    },
+    "bbox": {
+      "pass": true,
+      "detail": "all nodes in bounding box"
+    }
+  },
+  "soft": {
+    "max_degree": {
+      "ok": false,
+      "detail": "6 node(s) with degree > 5 (train hubs may legitimately run high); top-5: id 74=7, id 85=7, id 101=7, id 3=6, id 53=6"
+    },
+    "articulation": {
+      "ok": false,
+      "detail": "17 articulation point(s) (8.9% of nodes, want <=8%), 8 bridge edge(s)"
+    },
+    "mode_balance": {
+      "ok": true,
+      "detail": "per-mode {'TRAIN': 32, 'BUS': 98, 'ESCOOTER': 169}; exclusive {'TRAIN_only': 32, 'BUS_only': 84, 'ESCOOTER_only': 155}; multi-mode 14; ESCOOTER share 57%"
+    },
+    "distances": {
+      "ok": false,
+      "detail": "diameter 29 (want <=18), mean 10.5 hops (want 6-10), histogram {'1-3': 1446, '4-6': 2730, '7-9': 3456, '10-12': 4309, '13+': 6204}, 82% of pairs >=6 hops"
+    },
+    "spacing": {
+      "ok": true,
+      "detail": "min spacing 151 m; 0 pair(s) < 120 m"
+    },
+    "edge_length": {
+      "ok": false,
+      "detail": "2 non-TRAIN edge(s) > 2.5 km: 68-56 4.26 km ['BUS'], 68-69 4.11 km ['BUS']"
+    }
+  },
+  "metrics": {
+    "node_count": 191,
+    "edge_count": 285,
+    "mode_counts": {
+      "TRAIN": 32,
+      "BUS": 98,
+      "ESCOOTER": 169
+    },
+    "mode_exclusive_counts": {
+      "TRAIN_only": 32,
+      "BUS_only": 84,
+      "ESCOOTER_only": 155
+    },
+    "multi_mode_edge_count": 14,
+    "diameter": 29,
+    "mean_hops": 10.5,
+    "hop_histogram": {
+      "1-3": 1446,
+      "4-6": 2730,
+      "7-9": 3456,
+      "10-12": 4309,
+      "13+": 6204
+    },
+    "pct_pairs_ge_6": 82.3,
+    "articulation_count": 17,
+    "bridge_count": 8,
+    "min_spacing_m": 151.1,
+    "degree_histogram": {
+      "2": 80,
+      "3": 66,
+      "4": 22,
+      "5": 17,
+      "6": 3,
+      "7": 3
+    }
+  }
+}

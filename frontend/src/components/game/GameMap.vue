@@ -366,6 +366,22 @@ function setupLayers() {
   map.addSource('edges', { type: 'geojson', data: edgeGeoJSON() as any })
   map.addSource('nodes', { type: 'geojson', data: nodeGeoJSON() as any })
 
+  // Wide rail casing beneath the coloured edges: bus spurs legitimately run
+  // on the rail alignment, so without this band the purple train line
+  // disappears under the red one.
+  map.addLayer({
+    id: 'edges-train-casing',
+    type: 'line',
+    source: 'edges',
+    filter: ['==', ['get', 'mode'], 'TRAIN'],
+    paint: {
+      'line-color': MODE_COLORS.TRAIN,
+      'line-width': 8,
+      'line-offset': ['get', 'lineOffset'],
+      'line-opacity': ['case', ['boolean', ['get', 'dimmedEdge'], false], 0.1, 0.6] as any,
+    },
+  })
+
   // Parallel coloured lines — one feature per mode per edge
   map.addLayer({
     id: 'edges',

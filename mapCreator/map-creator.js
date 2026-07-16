@@ -243,7 +243,13 @@ function heapPop(h) {
   return top;
 }
 
-function findRoadPath(fromNode, toNode, maxDist = Infinity) {
+// opts.exclusive: skip road segments already used by other edges (see usedSegs).
+// A used segment stays passable only when every owning edge shares an endpoint
+// node with the edge being routed (opts.endpointIds) AND the current vertex is
+// within opts.exemptM metres of that shared endpoint (opts.endpointPts, aligned
+// with endpointIds) — this lets multiple edges fan out of a shared hub before
+// they must diverge onto distinct roads.
+function findRoadPath(fromNode, toNode, maxDist = Infinity, opts = {}) {
   const dist = new Map();
   const prev = new Map();
   const heap = [];
@@ -265,7 +271,41 @@ function findRoadPath(fromNode, toNode, maxDist = Infinity) {
     const [d, u] = heapPop(heap);
     if (d > maxDist) break;
     if (d > (dist.get(u) ?? Infinity)) continue;
+    let uPt = null; // lazily decoded coordinate of u for the exclusivity check
     for (const { key: v, dist: w } of (graphAdj.get(u) || [])) {
+      if (opts.exclusive) {
+        const owners = usedSegs.get(segKey2(u, v));
+        if (owners && owners.length) {
+          // Station-hub co-running: within hubM of a train-station endpoint,
+          // any owner is tolerated (modes converge on interchange streets).
+          if (opts.hubPt && haversine(coordFromKey(u), opts.hubPt) <= opts.hubM &&
+              haversine(coordFromKey(v), opts.hubPt) <= opts.hubM) {
+            const nd0 = d + w;
+            if (nd0 < (dist.get(v) ?? Infinity)) {
+              dist.set(v, nd0);
+              prev.set(v, u);
+              heapPush(heap, [nd0, v]);
+            }
+            continue;
+          }
+          let blocked = false;
+          for (const own of owners) {
+            // Rail-only edges don't occupy the road — trains run on tracks;
+            // the polyline is just the visual approximation.
+            if (!own.modes.includes('BUS') && !own.modes.includes('ESCOOTER')) continue;
+            // Edges that meet at a node may co-run along the same street for
+            // any distance (routes fanning out of a shared hub before
+            // diverging — the classic board look). Only edges with no common
+            // endpoint must keep to distinct roads.
+            if (own.from !== opts.endpointIds[0] && own.to !== opts.endpointIds[0] &&
+                own.from !== opts.endpointIds[1] && own.to !== opts.endpointIds[1]) {
+              blocked = true;
+              break;
+            }
+          }
+          if (blocked) continue;
+        }
+      }
       const nd = d + w;
       if (nd < (dist.get(v) ?? Infinity)) {
         dist.set(v, nd);
@@ -294,11 +334,23 @@ function findRoadPath(fromNode, toNode, maxDist = Infinity) {
 
 // Greedy farthest-point sampling of road-graph vertices within a geographic cluster.
 // Returns up to `count` vertices that maximise spatial spread inside `radiusM`.
+// Candidates are restricted to intersections (degree >= minVertexDeg) so placed
+// nodes have enough departure directions under road exclusivity; if that starves
+// the cluster, degree-2 chain vertices are appended as a deterministic fallback.
 function sampleVertices(center, radiusM, count) {
-  const cands = [];
+  const inRange = [];
   for (const key of graphAdj.keys()) {
     const coord = coordFromKey(key);
-    if (haversine(coord, center) <= radiusM) cands.push({ key, coord });
+    if (haversine(coord, center) <= radiusM) inRange.push({ key, coord });
+  }
+  const minDeg = MAPGEN().minVertexDeg ?? 3;
+  let cands = inRange.filter(c => (graphAdj.get(c.key) || []).length >= minDeg);
+  if (cands.length < count && minDeg > 2) {
+    const fallback = inRange.filter(c => {
+      const deg = (graphAdj.get(c.key) || []).length;
+      return deg >= 2 && deg < minDeg;
+    });
+    cands = cands.concat(fallback);
   }
   if (!cands.length) return [];
 
@@ -554,6 +606,20 @@ function initMap() {
     map.addLayer({
       id: 'selected-edge', type: 'line', source: 'selected-edge',
       paint: { 'line-color': '#ffffff', 'line-width': 11, 'line-opacity': 0.35 },
+    });
+
+    // Wide rail casing beneath the coloured edges: bus spurs legitimately run
+    // on the rail alignment, so without this band the purple line disappears
+    // under the red one.
+    map.addLayer({
+      id: 'edges-train-casing', type: 'line', source: 'edges',
+      filter: ['==', ['get', 'mode'], 'TRAIN'],
+      paint: {
+        'line-color': MODE_COLORS.TRAIN,
+        'line-width': 10,
+        'line-offset': ['get', 'lineOffset'],
+        'line-opacity': 0.8,
+      },
     });
 
     map.addLayer({
@@ -988,9 +1054,142 @@ async function autoGenerate() {
 
 const TRAIN_STEP_M   = 1200;  // target spacing between consecutive train nodes
 const BUS_STEP_M     = 500;   // target spacing between consecutive bus nodes
-const MERGE_RADIUS_M = 150;   // nodes closer than this are merged, not duplicated
+let   MERGE_RADIUS_M = 150;   // nodes closer than this are merged, not duplicated
 const ESCOOTER_MAX_M = 400;   // max straight-line distance for an escooter edge
 const MAX_BRIDGE_M   = 500;   // max gap to bridge between disconnected train components
+
+// Optional overrides for headless/scripted generation. A harness can set
+// window.MAPGEN_PARAMS before calling the gen functions; the browser UI is
+// unaffected when it is absent (all call sites fall back to the defaults).
+const MAPGEN = () => window.MAPGEN_PARAMS ?? {};
+
+// Generation diagnostics, surfaced by the headless harness (generate.py).
+window.__mcStats = { drivebySplits: 0, splitDepthFails: 0, exclusiveFails: 0, trainFallbacks: 0, mstRetries: 0 };
+
+// ── Road-exclusivity registry ─────────────────────────────
+// Maps each 6-dp road segment key to the edge objects whose polylines traverse
+// it, so findRoadPath can refuse already-used segments. Edge objects (not id
+// pairs) are stored so ownership reflects an edge's CURRENT modes: a TRAIN-only
+// edge is rail, not road, and does not occupy the road for exclusivity — but
+// if it later gains ESCOOTER (promotion) it becomes a road occupant.
+let usedSegs = new Map(); // segKey -> [edge, ...]
+
+const segKey2 = (a, b) => a < b ? a + '|' + b : b + '|' + a;
+
+// Road-route budget as a multiple of crow-flies distance. The anchor pass
+// temporarily raises it: under road exclusivity, short hops from a station
+// may legitimately need long detours around already-claimed streets.
+let ROUTE_DIST_MULT = 5;
+
+// Set by the station-anchor pass: {pt: [lng,lat], m: radius}. Within m of pt
+// (the station being anchored), routing tolerates any segment owner —
+// station-hub co-running for interchange streets.
+let ANCHOR_HUB = null;
+
+// All distinct road-graph vertices within maxM of a point, nearest first.
+// Used to re-seed routing for stations whose snapToRoad segment is a
+// motorway-class way with no nearby graph exit onto local streets.
+function nearbyVertexKeys(lng, lat, maxM, limit) {
+  const cx = Math.floor(lng / CELL), cy = Math.floor(lat / CELL);
+  const R = Math.ceil((maxM / 111320) / CELL) + 1;
+  const seen = new Map();
+  for (let dx = -R; dx <= R; dx++) {
+    for (let dy = -R; dy <= R; dy++) {
+      for (const { aKey, bKey } of (segGrid.get(`${cx + dx},${cy + dy}`) || [])) {
+        for (const k of [aKey, bKey]) {
+          if (seen.has(k)) continue;
+          const d = haversine([lng, lat], coordFromKey(k));
+          if (d <= maxM) seen.set(k, d);
+        }
+      }
+    }
+  }
+  return [...seen.entries()]
+    .sort((x, y) => x[1] - y[1] || (x[0] < y[0] ? -1 : 1))
+    .slice(0, limit)
+    .map(e => e[0]);
+}
+
+function registerSegs(e) {
+  const c = e.coordinates;
+  for (let i = 0; i < c.length - 1; i++) {
+    const aKey = coordKey(c[i]), bKey = coordKey(c[i + 1]);
+    if (aKey === bKey) continue;
+    const k = segKey2(aKey, bKey);
+    if (!usedSegs.has(k)) usedSegs.set(k, []);
+    usedSegs.get(k).push(e);
+  }
+}
+
+function rebuildUsedSegs() {
+  usedSegs = new Map();
+  for (const e of edges) registerSegs(e);
+}
+
+// A rail-only edge may gain a road mode (promotion) only if none of its
+// segments are already occupied by a road-mode edge — otherwise promoting it
+// would retroactively create a shared-road violation.
+function promotionSafe(e) {
+  const c = e.coordinates;
+  for (let i = 0; i < c.length - 1; i++) {
+    const aKey = coordKey(c[i]), bKey = coordKey(c[i + 1]);
+    if (aKey === bKey) continue;
+    for (const own of (usedSegs.get(segKey2(aKey, bKey)) ?? [])) {
+      if (own === e) continue;
+      if (own.modes.includes('BUS') || own.modes.includes('ESCOOTER')) return false;
+    }
+  }
+  return true;
+}
+
+// ── Drive-by rule helpers ─────────────────────────────────
+// Equirectangular point-to-segment distance at Wellington's latitude:
+// cheap, accurate to well under a metre over the corridor scales used here.
+const WLG_COS   = Math.cos(-41.25 * Math.PI / 180); // ≈ 0.7518
+const M_PER_DEG = 6_371_000 * Math.PI / 180;        // ≈ 111,195 m per degree
+
+function ptSegDistM(p, a, b) {
+  const px = (p[0] - a[0]) * WLG_COS, py = p[1] - a[1];
+  const bx = (b[0] - a[0]) * WLG_COS, by = b[1] - a[1];
+  const lenSq = bx * bx + by * by;
+  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, (px * bx + py * by) / lenSq));
+  const dx = px - t * bx, dy = py - t * by;
+  return { d: Math.sqrt(dx * dx + dy * dy) * M_PER_DEG, t };
+}
+
+// Nodes (other than the edge's own endpoints) that the polyline passes within
+// corridorM of, sorted by fraction along the polyline so a blocked edge can be
+// split into from → b1 → … → to hops.
+function drivebyBlockers(coords, fromId, toId, blockerNodes, corridorM) {
+  const nSegs = coords.length - 1;
+  if (nSegs < 1) return [];
+  const hits = [];
+  for (const n of blockerNodes) {
+    if (n.id === fromId || n.id === toId) continue;
+    let bestD = Infinity, bestT = 0;
+    for (let i = 0; i < nSegs; i++) {
+      const { d, t } = ptSegDistM([n.lng, n.lat], coords[i], coords[i + 1]);
+      if (d < bestD) { bestD = d; bestT = (i + t) / nSegs; }
+    }
+    if (bestD < corridorM) hits.push({ n, t: bestT });
+  }
+  hits.sort((x, y) => x.t - y.t || x.n.id - y.n.id);
+  return hits.map(h => h.n);
+}
+
+// True when [lng,lat] lies within corridorM of any BUS/ESCOOTER edge polyline —
+// used to refuse creating new nodes that would retroactively violate the
+// drive-by rule for edges that already exist.
+function nearRoadModeEdge(lng, lat, corridorM) {
+  for (const e of edges) {
+    if (!e.modes.includes('BUS') && !e.modes.includes('ESCOOTER')) continue;
+    const c = e.coordinates;
+    for (let i = 0; i < c.length - 1; i++) {
+      if (ptSegDistM([lng, lat], c[i], c[i + 1]).d < corridorM) return true;
+    }
+  }
+  return false;
+}
 
 // Strip all edges of the given mode, then remove any nodes left with no edges.
 function clearModeEdges(mode) {
@@ -1109,6 +1308,8 @@ async function genTrain() {
   const btn = document.getElementById('btn-gen-train');
   btn.disabled = true;
   clearModeEdges('TRAIN');
+  rebuildUsedSegs();
+  window.__mcStats = { drivebySplits: 0, splitDepthFails: 0, exclusiveFails: 0, trainFallbacks: 0, mstRetries: 0 };
 
   setStatus('Placing train nodes at actual station positions…');
 
@@ -1132,28 +1333,82 @@ async function genTrain() {
     return best;
   }
 
-  function tryAddTrainEdge(from, to) {
-    if (from.id === to.id) return;
-    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return;
-    if (!from.segAKey || !to.segAKey) return;
-    const dist = haversine([from.lng, from.lat], [to.lng, to.lat]);
-    const coords = findRoadPath(from, to, dist * 3);
-    if (coords.length <= 2) return; // no road path found, skip beeline
-    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['TRAIN'], coordinates: coords });
+  // All unique station nodes across every line — the drive-by blocker set for
+  // TRAIN edges (a train may not pass a station without stopping there).
+  const trainStations = [];
+
+  function trainFail(from, to, depth, reason) {
+    if ((__mcStats.trainFails ??= []).length < 100) {
+      __mcStats.trainFails.push({ f: from.id, t: to.id, d: depth, r: reason });
+    }
+    return false;
   }
 
-  // ── place one node per station, connect consecutive stops per line ──────────
+  function tryAddTrainEdge(from, to, depth = 0) {
+    if (from.id === to.id) return false;
+    // Mode-aware dedup: only an existing TRAIN-carrying edge counts as success.
+    const existingT = edges.find(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id));
+    if (existingT) return existingT.modes.includes('TRAIN') || trainFail(from, to, depth, 'dedup-mode');
+    if (!from.segAKey || !to.segAKey) return trainFail(from, to, depth, 'nosnap');
+    const dist = haversine([from.lng, from.lat], [to.lng, to.lat]);
+    const excl = MAPGEN().roadExclusive ?? true;
+    const opts = excl ? {
+      exclusive: true,
+      endpointIds: [from.id, to.id],
+      endpointPts: [[from.lng, from.lat], [to.lng, to.lat]],
+      exemptM: MAPGEN().exclusiveExemptEndM ?? 100,
+      ...(ANCHOR_HUB ? { hubPt: ANCHOR_HUB.pt, hubM: ANCHOR_HUB.m } : {}),
+    } : {};
+    let coords = findRoadPath(from, to, dist * 3, opts);
+    if (coords.length <= 2 && excl) {
+      // Rail corridors legitimately share track (e.g. Wellington approach) —
+      // fall back to a non-exclusive route rather than losing the line.
+      __mcStats.trainFallbacks++;
+      coords = findRoadPath(from, to, dist * 3, {});
+    }
+    if (coords.length <= 2) return trainFail(from, to, depth, 'noroute'); // no road path found, skip beeline
+    const blockers = drivebyBlockers(coords, from.id, to.id, trainStations,
+                                     MAPGEN().drivebyCorridorTrainM ?? 150);
+    if (blockers.length) {
+      if (depth >= (MAPGEN().drivebySplitDepth ?? 2)) { __mcStats.splitDepthFails++; return trainFail(from, to, depth, 'splitdepth'); }
+      __mcStats.drivebySplits++;
+      if ((__mcStats.trainSplits ??= []).length < 50) {
+        __mcStats.trainSplits.push({ f: from.id, t: to.id, d: depth, via: blockers.map(b => b.id) });
+      }
+      let prev = from, ok = true;
+      for (const b of [...blockers, to]) { ok = tryAddTrainEdge(prev, b, depth + 1) && ok; prev = b; }
+      return ok;
+    }
+    const e = { id: nextEdgeId++, from: from.id, to: to.id, modes: ['TRAIN'], coordinates: coords };
+    edges.push(e);
+    registerSegs(e);
+    if ((__mcStats.trainAdds ??= []).length < 60) __mcStats.trainAdds.push([from.id, to.id]);
+    return true;
+  }
 
-  for (let li = 0; li < WELLINGTON_TRAIN_LINES.length; li++) {
-    const line = WELLINGTON_TRAIN_LINES[li];
-    let prev = null;
+  // ── pass 1: place/merge every station across all lines ─────────────────────
+  // Edges are only added once ALL stations exist, so the drive-by blocker set
+  // is complete even for the first line processed.
+
+  const stationIds = new Set();
+  const lineNodes  = [];
+  for (const line of WELLINGTON_TRAIN_LINES) {
+    const resolved = [];
     for (const coord of line) {
       // Merge stations shared across lines (e.g. Wellington Station, Petone)
       const node = nearestTrain(coord, MERGE_RADIUS_M) ?? addTrainNode(coord[0], coord[1]);
-      if (prev) tryAddTrainEdge(prev, node);
-      prev = node;
+      resolved.push(node);
+      if (!stationIds.has(node.id)) { stationIds.add(node.id); trainStations.push(node); }
     }
-    setStatus(`Train: line ${li + 1}/${WELLINGTON_TRAIN_LINES.length}…`);
+    lineNodes.push(resolved);
+  }
+
+  // ── pass 2: connect consecutive stops per line ──────────────────────────────
+
+  for (let li = 0; li < lineNodes.length; li++) {
+    const resolved = lineNodes[li];
+    for (let i = 1; i < resolved.length; i++) tryAddTrainEdge(resolved[i - 1], resolved[i]);
+    setStatus(`Train: line ${li + 1}/${lineNodes.length}…`);
     refreshSources(); updateCounts();
     await yld();
   }
@@ -1173,10 +1428,85 @@ async function genBus() {
   const btn = document.getElementById('btn-gen-bus');
   btn.disabled = true;
   clearModeEdges('BUS');
+  rebuildUsedSegs();
+
+  // Anchor every train station to a non-train node via "park & ride" spurs.
+  // Runs pre-mesh (start of genBus): for each rail hop with an unanchored
+  // endpoint, place a spur node at the MIDPOINT OF THE RAIL POLYLINE ITSELF —
+  // the road path is already proven (the train routes it), rail-only
+  // ownership never blocks road modes, and pre-mesh there is nothing nearby
+  // to brush, so both half-edges are valid by construction. One spur anchors
+  // both of its stations.
+  if ((MAPGEN().anchorStationsMaxM ?? 4000) > 0) {
+    const trainEdges = edges.filter(e => e.modes.includes('TRAIN'));
+    const trainIdSet = new Set(trainEdges.flatMap(e => [e.from, e.to]));
+    const anchoredSet = new Set();
+    for (const e of edges) {
+      if (trainIdSet.has(e.from) && !trainIdSet.has(e.to)) anchoredSet.add(e.from);
+      if (trainIdSet.has(e.to) && !trainIdSet.has(e.from)) anchoredSet.add(e.to);
+    }
+    // Greedy: rail hops covering two unanchored stations first.
+    const railSorted = [...trainEdges].sort((a, b) => {
+      const ua = (anchoredSet.has(a.from) ? 0 : 1) + (anchoredSet.has(a.to) ? 0 : 1);
+      const ub = (anchoredSet.has(b.from) ? 0 : 1) + (anchoredSet.has(b.to) ? 0 : 1);
+      return ub - ua || a.from - b.from || a.to - b.to;
+    });
+    // A spur point must keep clear of every existing node AND every other
+    // polyline — parallel rail lines co-run out of shared stations (e.g.
+    // Petone), and a spur on one line placed inside the shared stretch sits
+    // in the drive-by corridor of the other line's half-edges.
+    const clearM = (MAPGEN().drivebyCorridorM ?? 120) + 15;
+    const spurPointOk = (pt, re) => {
+      if (!nodes.every(o => haversine([o.lng, o.lat], pt) >= clearM)) return false;
+      for (const e of edges) {
+        if (e === re || !e.coordinates) continue;
+        const pc = e.coordinates;
+        for (let i = 0; i < pc.length - 1; i++) {
+          if (ptSegDistM(pt, pc[i], pc[i + 1]).d < clearM) return false;
+        }
+      }
+      return true;
+    };
+    let spurs = 0;
+    for (const re of railSorted) {
+      if (anchoredSet.has(re.from) && anchoredSet.has(re.to)) continue;
+      const c = re.coordinates;
+      if (!c || c.length < 4) continue;
+      // Middle-out search for a clear spur point on the rail polyline.
+      let mid = -1;
+      const center = Math.floor(c.length / 2);
+      for (let off = 0; off <= c.length / 2; off++) {
+        for (const i of off === 0 ? [center] : [center - off, center + off]) {
+          if (i < 1 || i > c.length - 2) continue;
+          if (spurPointOk(c[i], re)) { mid = i; break; }
+        }
+        if (mid >= 0) break;
+      }
+      if (mid < 0) continue; // no clear point on this hop — try another hop
+      const vk = coordKey(c[mid]);
+      const nv = { id: nextNodeId++, lng: c[mid][0], lat: c[mid][1],
+                   label: String(nextNodeId - 1), segAKey: vk, segBKey: vk };
+      nodes.push(nv);
+      const eA = { id: nextEdgeId++, from: re.from, to: nv.id, modes: ['BUS'],
+                   coordinates: c.slice(0, mid + 1) };
+      const eB = { id: nextEdgeId++, from: nv.id, to: re.to, modes: ['BUS'],
+                   coordinates: c.slice(mid) };
+      edges.push(eA); registerSegs(eA);
+      edges.push(eB); registerSegs(eB);
+      anchoredSet.add(re.from); anchoredSet.add(re.to);
+      (__mcStats.spurNodes ??= []).push({ spur: nv.id, between: [re.from, re.to] });
+      spurs++;
+    }
+    __mcStats.anchored = anchoredSet.size;
+    (__mcStats.anchorFails ??= []).push(
+      ...[...trainIdSet].filter(id => !anchoredSet.has(id)).map(id => ({ station: id, cands: 0 })));
+    setStatus(`Anchored ${anchoredSet.size} stations via ${spurs} park-and-ride spurs…`);
+    await yld();
+  }
 
   // Four geographic clusters.  Nodes are sampled from road-graph vertices
   // inside each cluster radius, then connected via Dijkstra road routing.
-  const CLUSTERS = [
+  const CLUSTERS = MAPGEN().busClusters ?? [
     { name: 'Wellington',   center: [174.776, -41.286], radiusM: 2800, count: 20 },
     { name: 'Lower Hutt',   center: [174.908, -41.213], radiusM: 3200, count: 20 },
     { name: 'Johnsonville', center: [174.804, -41.228], radiusM: 2000, count: 15 },
@@ -1187,6 +1517,14 @@ async function genBus() {
 
   function makeNode(key) {
     const [lng, lat] = coordFromKey(key);
+    // Reuse any existing node (e.g. a train station) within merge radius so bus
+    // stops don't duplicate stations and the tiers share hubs.
+    for (const n of nodes) {
+      if (haversine([n.lng, n.lat], [lng, lat]) <= MERGE_RADIUS_M) return n;
+    }
+    // A brand-new node sitting inside an existing edge's drive-by corridor would
+    // retroactively violate the rule — refuse to create it.
+    if (nearRoadModeEdge(lng, lat, MAPGEN().drivebyCorridorM ?? 120)) return null;
     // Node is placed exactly at a road-graph vertex: segAKey = segBKey = the vertex key.
     // findRoadPath initialises Dijkstra at distance 0 from this vertex, so routing works perfectly.
     const n = { id: nextNodeId++, lng, lat, label: String(nextNodeId - 1),
@@ -1195,13 +1533,43 @@ async function genBus() {
     return n;
   }
 
-  function addBusEdge(from, to) {
+  function addBusEdge(from, to, depth = 0) {
     if (from.id === to.id) return false;
-    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return false;
+    // Mode-aware dedup: an existing edge only counts if it carries (or can
+    // safely gain) this mode — otherwise a stitch/split "succeeds" without
+    // giving the endpoints a BUS-traversable link.
+    const existing = edges.find(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id));
+    if (existing) {
+      if (existing.modes.includes('BUS')) return true;
+      const blk = drivebyBlockers(existing.coordinates, existing.from, existing.to, nodes, MAPGEN().drivebyCorridorM ?? 120);
+      if (blk.length) return false; // polyline passes other nodes — unsafe as a road-mode edge
+      if (!promotionSafe(existing)) return false; // its road is already taken by a road-mode edge
+      existing.modes = [...existing.modes, 'BUS'];
+      return true;
+    }
     const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
-    const coords = findRoadPath(from, to, d * 5);
-    if (coords.length <= 2) return false; // no road path found, skip beeline
-    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['BUS'], coordinates: coords });
+    const excl = MAPGEN().roadExclusive ?? true;
+    const opts = excl ? {
+      exclusive: true,
+      endpointIds: [from.id, to.id],
+      endpointPts: [[from.lng, from.lat], [to.lng, to.lat]],
+      exemptM: MAPGEN().exclusiveExemptEndM ?? 100,
+      ...(ANCHOR_HUB ? { hubPt: ANCHOR_HUB.pt, hubM: ANCHOR_HUB.m } : {}),
+    } : {};
+    const coords = findRoadPath(from, to, d * ROUTE_DIST_MULT, opts);
+    if (coords.length <= 2) { __mcStats.exclusiveFails++; return false; } // no usable road path, skip beeline
+    const blockers = drivebyBlockers(coords, from.id, to.id, nodes, MAPGEN().drivebyCorridorM ?? 120);
+    if (blockers.length) {
+      // The route passes other nodes — split it into hops that stop at each.
+      if (depth >= (MAPGEN().drivebySplitDepth ?? 2)) { __mcStats.splitDepthFails++; return false; }
+      __mcStats.drivebySplits++;
+      let prev = from, ok = true;
+      for (const b of [...blockers, to]) { ok = addBusEdge(prev, b, depth + 1) && ok; prev = b; }
+      return ok;
+    }
+    const e = { id: nextEdgeId++, from: from.id, to: to.id, modes: ['BUS'], coordinates: coords };
+    edges.push(e);
+    registerSegs(e);
     return true;
   }
 
@@ -1212,27 +1580,52 @@ async function genBus() {
     await yld();
 
     const verts   = sampleVertices(cl.center, cl.radiusM, cl.count);
-    const cluster = verts.map(v => makeNode(v.key));
+    const cluster = verts.map(v => makeNode(v.key)).filter(Boolean);
+
+    // Train stations inside (or near) the cluster join it as first-class bus
+    // stops — real interchanges. The MST/extraNN machinery then wires them in
+    // with proper endpoint exemptions, instead of a later pass fighting for
+    // streets the bus network has already claimed.
+    {
+      const inCluster = new Set(cluster.map(n => n.id));
+      const stations = edges.filter(e => e.modes.includes('TRAIN')).flatMap(e => [e.from, e.to]);
+      const stationIds = [...new Set(stations)].sort((a, b) => a - b);
+      const byId = new Map(nodes.map(n => [n.id, n]));
+      for (const sid of stationIds) {
+        if (inCluster.has(sid)) continue;
+        const s = byId.get(sid);
+        if (!s || !s.segAKey) continue;
+        if (haversine([s.lng, s.lat], cl.center) <= cl.radiusM * 1.5) {
+          cluster.push(s);
+          inCluster.add(sid);
+        }
+      }
+    }
 
     if (cluster.length < 2) continue;
 
-    // Prim's MST — guarantees full connectivity
+    // Prim's MST with retry — under exclusivity/drive-by rejection the closest
+    // pair may fail to route, so try candidate pairs in ascending distance
+    // until one succeeds instead of adding the single best pair blindly.
     const inTree = new Set([cluster[0].id]);
-    const nodeById = new Map(cluster.map(n => [n.id, n]));
 
     while (inTree.size < cluster.length) {
-      let bestDist = Infinity, bestFrom = null, bestTo = null;
-      for (const fromId of inTree) {
-        const from = nodeById.get(fromId);
+      const cands = [];
+      for (const from of cluster) {
+        if (!inTree.has(from.id)) continue;
         for (const to of cluster) {
           if (inTree.has(to.id)) continue;
-          const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
-          if (d < bestDist) { bestDist = d; bestFrom = from; bestTo = to; }
+          cands.push({ from, to, d: haversine([from.lng, from.lat], [to.lng, to.lat]) });
         }
       }
-      if (!bestFrom) break;
-      addBusEdge(bestFrom, bestTo);
-      inTree.add(bestTo.id);
+      if (!cands.length) break;
+      cands.sort((a, b) => a.d - b.d || a.from.id - b.from.id || a.to.id - b.to.id);
+      let added = false;
+      for (const c of cands) {
+        if (addBusEdge(c.from, c.to)) { inTree.add(c.to.id); added = true; break; }
+        __mcStats.mstRetries++;
+      }
+      if (!added) break; // no routable pair left — remaining nodes stay out of tree
     }
 
     // Extra connections: each node also links to its 2 nearest cluster neighbours
@@ -1242,7 +1635,7 @@ async function genBus() {
         .filter(n => n.id !== from.id)
         .sort((a, b) => haversine([from.lng, from.lat], [a.lng, a.lat])
                       - haversine([from.lng, from.lat], [b.lng, b.lat]));
-      for (const to of sorted.slice(0, 2)) addBusEdge(from, to);
+      for (const to of sorted.slice(0, MAPGEN().busExtraNN ?? 2)) addBusEdge(from, to);
     }
 
     // Enforce minimum degree of 2: keep trying further neighbours, then drop
@@ -1261,13 +1654,20 @@ async function genBus() {
       for (const n of cluster) {
         for (const cand of byDist.get(n.id)) {
           if (deg.get(n.id) >= 2) break;
+          // Skip already-connected pairs: addBusEdge now reports those as
+          // success, which would double-count degrees already tallied above.
+          if (edges.some(e => (e.from===n.id&&e.to===cand.id)||(e.from===cand.id&&e.to===n.id))) continue;
           if (addBusEdge(n, cand)) {
             deg.set(n.id,    deg.get(n.id)    + 1);
             deg.set(cand.id, (deg.get(cand.id) ?? 0) + 1);
           }
         }
       }
-      const orphans = new Set(cluster.filter(n => deg.get(n.id) < 2).map(n => n.id));
+      // Never orphan-drop a node carrying a TRAIN edge — deleting it would
+      // silently sever the rail line (stations merged into clusters rarely
+      // win 2 same-mode edges; the stitch/repair passes handle their degree).
+      const trainTouched = new Set(edges.filter(e => e.modes.includes('TRAIN')).flatMap(e => [e.from, e.to]));
+      const orphans = new Set(cluster.filter(n => deg.get(n.id) < 2 && !trainTouched.has(n.id)).map(n => n.id));
       if (orphans.size) {
         edges = edges.filter(e => !orphans.has(e.from) && !orphans.has(e.to));
         nodes = nodes.filter(n => !orphans.has(n.id));
@@ -1294,19 +1694,26 @@ async function genEscooter() {
   const btn = document.getElementById('btn-gen-escooter');
   btn.disabled = true;
   clearModeEdges('ESCOOTER');
+  rebuildUsedSegs();
 
   // Most bus edges are also valid escooter routes — add the mode directly.
+  // Edges longer than escooterPromoteMaxM stay BUS-only, preserving a mid tier.
+  const maxPromoteM = MAPGEN().escooterPromoteMaxM ?? Infinity;
+  const promoteNodeById = new Map(nodes.map(n => [n.id, n]));
   let busPromoted = 0;
   for (const e of edges) {
     if (e.modes.includes('BUS') && !e.modes.includes('ESCOOTER')) {
+      const a = promoteNodeById.get(e.from), b = promoteNodeById.get(e.to);
+      if (a && b && haversine([a.lng, a.lat], [b.lng, b.lat]) > maxPromoteM) continue;
       e.modes = [...e.modes, 'ESCOOTER'];
       busPromoted++;
     }
   }
 
+
   // 90 dedicated escooter nodes across the same 4 clusters as bus, but with
   // higher node density (shorter inter-node spacing) due to more nodes per cluster.
-  const CLUSTERS = [
+  const CLUSTERS = MAPGEN().escooterClusters ?? [
     { name: 'Wellington',   center: [174.776, -41.286], radiusM: 2500, count: 28 },
     { name: 'Lower Hutt',   center: [174.908, -41.213], radiusM: 2800, count: 25 },
     { name: 'Johnsonville', center: [174.804, -41.228], radiusM: 1800, count: 20 },
@@ -1319,19 +1726,51 @@ async function genEscooter() {
     for (const n of nodes) {
       if (haversine([n.lng, n.lat], [lng, lat]) <= MERGE_RADIUS_M) return n;
     }
+    // A brand-new node sitting inside an existing edge's drive-by corridor would
+    // retroactively violate the rule — refuse to create it.
+    if (nearRoadModeEdge(lng, lat, MAPGEN().drivebyCorridorM ?? 120)) return null;
     const n = { id: nextNodeId++, lng, lat, label: String(nextNodeId - 1),
                 segAKey: key, segBKey: key };
     nodes.push(n);
     return n;
   }
 
-  function addEscooterEdge(from, to) {
+  function addEscooterEdge(from, to, depth = 0) {
     if (from.id === to.id) return false;
-    if (edges.some(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id))) return false;
+    // Mode-aware dedup (see addBusEdge): only count existing edges that carry
+    // or can safely gain ESCOOTER.
+    const existing = edges.find(e => (e.from===from.id&&e.to===to.id)||(e.from===to.id&&e.to===from.id));
+    if (existing) {
+      if (existing.modes.includes('ESCOOTER')) return true;
+      const blk = drivebyBlockers(existing.coordinates, existing.from, existing.to, nodes, MAPGEN().drivebyCorridorM ?? 120);
+      if (blk.length) return false; // polyline passes other nodes — unsafe as a road-mode edge
+      if (!promotionSafe(existing)) return false; // its road is already taken by a road-mode edge
+      existing.modes = [...existing.modes, 'ESCOOTER'];
+      return true;
+    }
     const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
-    const coords = findRoadPath(from, to, d * 5);
-    if (coords.length <= 2) return false; // no road path found, skip beeline
-    edges.push({ id: nextEdgeId++, from: from.id, to: to.id, modes: ['ESCOOTER'], coordinates: coords });
+    const excl = MAPGEN().roadExclusive ?? true;
+    const opts = excl ? {
+      exclusive: true,
+      endpointIds: [from.id, to.id],
+      endpointPts: [[from.lng, from.lat], [to.lng, to.lat]],
+      exemptM: MAPGEN().exclusiveExemptEndM ?? 100,
+      ...(ANCHOR_HUB ? { hubPt: ANCHOR_HUB.pt, hubM: ANCHOR_HUB.m } : {}),
+    } : {};
+    const coords = findRoadPath(from, to, d * ROUTE_DIST_MULT, opts);
+    if (coords.length <= 2) { __mcStats.exclusiveFails++; return false; } // no usable road path, skip beeline
+    const blockers = drivebyBlockers(coords, from.id, to.id, nodes, MAPGEN().drivebyCorridorM ?? 120);
+    if (blockers.length) {
+      // The route passes other nodes — split it into hops that stop at each.
+      if (depth >= (MAPGEN().drivebySplitDepth ?? 2)) { __mcStats.splitDepthFails++; return false; }
+      __mcStats.drivebySplits++;
+      let prev = from, ok = true;
+      for (const b of [...blockers, to]) { ok = addEscooterEdge(prev, b, depth + 1) && ok; prev = b; }
+      return ok;
+    }
+    const e = { id: nextEdgeId++, from: from.id, to: to.id, modes: ['ESCOOTER'], coordinates: coords };
+    edges.push(e);
+    registerSegs(e);
     return true;
   }
 
@@ -1340,27 +1779,32 @@ async function genEscooter() {
     await yld();
 
     const verts   = sampleVertices(cl.center, cl.radiusM, cl.count);
-    const cluster = verts.map(v => getOrMakeNode(v.key));
+    const cluster = verts.map(v => getOrMakeNode(v.key)).filter(Boolean);
 
     if (cluster.length < 2) continue;
 
-    // Prim's MST — guarantees full connectivity within the cluster
+    // Prim's MST with retry — under exclusivity/drive-by rejection the closest
+    // pair may fail to route, so try candidate pairs in ascending distance
+    // until one succeeds instead of adding the single best pair blindly.
     const inTree = new Set([cluster[0].id]);
-    const nodeById = new Map(cluster.map(n => [n.id, n]));
 
     while (inTree.size < cluster.length) {
-      let bestDist = Infinity, bestFrom = null, bestTo = null;
-      for (const fromId of inTree) {
-        const from = nodeById.get(fromId);
+      const cands = [];
+      for (const from of cluster) {
+        if (!inTree.has(from.id)) continue;
         for (const to of cluster) {
           if (inTree.has(to.id)) continue;
-          const d = haversine([from.lng, from.lat], [to.lng, to.lat]);
-          if (d < bestDist) { bestDist = d; bestFrom = from; bestTo = to; }
+          cands.push({ from, to, d: haversine([from.lng, from.lat], [to.lng, to.lat]) });
         }
       }
-      if (!bestFrom) break;
-      addEscooterEdge(bestFrom, bestTo);
-      inTree.add(bestTo.id);
+      if (!cands.length) break;
+      cands.sort((a, b) => a.d - b.d || a.from.id - b.from.id || a.to.id - b.to.id);
+      let added = false;
+      for (const c of cands) {
+        if (addEscooterEdge(c.from, c.to)) { inTree.add(c.to.id); added = true; break; }
+        __mcStats.mstRetries++;
+      }
+      if (!added) break; // no routable pair left — remaining nodes stay out of tree
     }
 
     // Each node also connects to its 3 nearest cluster neighbours for richer topology
@@ -1369,7 +1813,7 @@ async function genEscooter() {
         .filter(n => n.id !== from.id)
         .sort((a, b) => haversine([from.lng, from.lat], [a.lng, a.lat])
                       - haversine([from.lng, from.lat], [b.lng, b.lat]));
-      for (const to of sorted.slice(0, 3)) addEscooterEdge(from, to);
+      for (const to of sorted.slice(0, MAPGEN().escooterExtraNN ?? 3)) addEscooterEdge(from, to);
     }
 
     // Enforce minimum degree of 2: keep trying further neighbours, then drop
@@ -1388,13 +1832,20 @@ async function genEscooter() {
       for (const n of cluster) {
         for (const cand of byDist.get(n.id)) {
           if (deg.get(n.id) >= 2) break;
+          // Skip already-connected pairs: addEscooterEdge now reports those as
+          // success, which would double-count degrees already tallied above.
+          if (edges.some(e => (e.from===n.id&&e.to===cand.id)||(e.from===cand.id&&e.to===n.id))) continue;
           if (addEscooterEdge(n, cand)) {
             deg.set(n.id,    deg.get(n.id)    + 1);
             deg.set(cand.id, (deg.get(cand.id) ?? 0) + 1);
           }
         }
       }
-      const orphans = new Set(cluster.filter(n => deg.get(n.id) < 2).map(n => n.id));
+      // Never orphan-drop a node carrying a TRAIN edge — deleting it would
+      // silently sever the rail line (stations merged into clusters rarely
+      // win 2 same-mode edges; the stitch/repair passes handle their degree).
+      const trainTouched = new Set(edges.filter(e => e.modes.includes('TRAIN')).flatMap(e => [e.from, e.to]));
+      const orphans = new Set(cluster.filter(n => deg.get(n.id) < 2 && !trainTouched.has(n.id)).map(n => n.id));
       if (orphans.size) {
         edges = edges.filter(e => !orphans.has(e.from) && !orphans.has(e.to));
         nodes = nodes.filter(n => !orphans.has(n.id));
@@ -1404,6 +1855,148 @@ async function genEscooter() {
     refreshSources(); updateCounts();
     setStatus(`Escooter: ${cl.name} done (${cluster.length} nodes)…`);
     await yld();
+  }
+
+  // Stitch train stations into the local mesh. A station with no BUS/ESCOOTER
+  // edge is uncontestable by detectives and leaves the rail spine as its own
+  // component; connect each such station to its nearest mesh nodes by road.
+  const stitchMaxM = MAPGEN().stitchStationsMaxM ?? 1500;
+  const stitchDeg  = MAPGEN().stitchStationsDegree ?? 2;
+  if (stitchMaxM > 0) {
+    const trainIds = new Set(), meshIds = new Set();
+    for (const e of edges) {
+      if (e.modes.includes('TRAIN')) { trainIds.add(e.from); trainIds.add(e.to); }
+      if (e.modes.includes('BUS') || e.modes.includes('ESCOOTER')) { meshIds.add(e.from); meshIds.add(e.to); }
+    }
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    let stitched = 0;
+    for (const tid of trainIds) {
+      if (meshIds.has(tid)) continue;
+      const t = byId.get(tid);
+      if (!t) continue;
+      const cands = nodes
+        .filter(n => meshIds.has(n.id))
+        .map(n => ({ n, d: haversine([t.lng, t.lat], [n.lng, n.lat]) }))
+        .filter(c => c.d <= stitchMaxM)
+        .sort((a, b) => a.d - b.d);
+      let added = 0;
+      for (const { n } of cands) {
+        if (added >= stitchDeg) break;
+        if (addEscooterEdge(t, n)) added++;
+      }
+      if (added) { meshIds.add(tid); stitched++; }
+      else (__mcStats.stitchFails ??= []).push({ station: tid, cands: cands.length });
+    }
+    setStatus(`Stitched ${stitched} train stations into the mesh…`);
+    await yld();
+  }
+
+  // Bridge any remaining disconnected components into the largest one, so the
+  // final graph is always a single board. Closest road-routable pair wins.
+  const bridgeMaxM = MAPGEN().bridgeComponentsMaxM ?? 3000;
+  if (bridgeMaxM > 0) {
+    for (let guard = 0; guard < 10; guard++) {
+      const adj = new Map();
+      for (const e of edges) {
+        if (!adj.has(e.from)) adj.set(e.from, []);
+        if (!adj.has(e.to))   adj.set(e.to, []);
+        adj.get(e.from).push(e.to);
+        adj.get(e.to).push(e.from);
+      }
+      const seen = new Set(), comps = [];
+      for (const n of nodes) {
+        if (seen.has(n.id) || !adj.has(n.id)) continue;
+        const comp = [], stack = [n.id];
+        seen.add(n.id);
+        while (stack.length) {
+          const id = stack.pop();
+          comp.push(id);
+          for (const nb of adj.get(id) ?? []) {
+            if (!seen.has(nb)) { seen.add(nb); stack.push(nb); }
+          }
+        }
+        comps.push(comp);
+      }
+      if (comps.length <= 1) break;
+      comps.sort((a, b) => b.length - a.length);
+      const main = new Set(comps[0]);
+      const byId = new Map(nodes.map(n => [n.id, n]));
+      const cands = [];
+      for (const comp of comps.slice(1)) {
+        for (const aid of comp) {
+          const a = byId.get(aid);
+          for (const bid of main) {
+            const b = byId.get(bid);
+            const d = haversine([a.lng, a.lat], [b.lng, b.lat]);
+            if (d <= bridgeMaxM) cands.push({ a, b, d });
+          }
+        }
+      }
+      cands.sort((x, y) => x.d - y.d || x.a.id - y.a.id || x.b.id - y.b.id);
+      let bridged = false;
+      for (const c of cands) {
+        if (addEscooterEdge(c.a, c.b)) { bridged = true; break; }
+      }
+      if (!bridged) {
+        (__mcStats.bridgeFails ??= []).push({ comps: comps.map(c => c.length), cands: cands.length });
+        // Unbridgeable stray components without stations are expendable —
+        // dropping them beats shipping a multi-component board.
+        const stationIds2 = new Set(edges.filter(e => e.modes.includes('TRAIN')).flatMap(e => [e.from, e.to]));
+        const strays = new Set(comps.slice(1).filter(c => !c.some(id => stationIds2.has(id))).flat());
+        if (strays.size) {
+          __mcStats.strayDropped = (__mcStats.strayDropped ?? 0) + strays.size;
+          edges = edges.filter(e => !strays.has(e.from) && !strays.has(e.to));
+          nodes = nodes.filter(n => !strays.has(n.id));
+          rebuildUsedSegs();
+        }
+        break; // nothing routable within range — give up rather than loop
+      }
+      setStatus('Bridged a disconnected component into the main graph…');
+      await yld();
+    }
+  }
+
+  // Final degree repair + leaf prune. Stations can end up degree-1 (line
+  // terminus with a failed stitch) and mesh nodes can end up stranded when
+  // every candidate edge was rejected by the road rules. Repair by linking
+  // low-degree nodes to their nearest connected neighbours, then iteratively
+  // drop non-station leaves that still can't reach degree 2 (safe for
+  // connectivity: a leaf's removal never disconnects anyone else).
+  {
+    const degOf = () => {
+      const d = new Map();
+      for (const e of edges) {
+        d.set(e.from, (d.get(e.from) ?? 0) + 1);
+        d.set(e.to,   (d.get(e.to)   ?? 0) + 1);
+      }
+      return d;
+    };
+    const repairMaxM = MAPGEN().repairMaxM ?? 2500;
+    let deg = degOf();
+    for (const n of [...nodes]) {
+      if ((deg.get(n.id) ?? 0) >= 2) continue;
+      const cands = nodes
+        .filter(o => o.id !== n.id && (deg.get(o.id) ?? 0) >= 2)
+        .map(o => ({ o, d: haversine([n.lng, n.lat], [o.lng, o.lat]) }))
+        .filter(c => c.d <= repairMaxM)
+        .sort((a, b) => a.d - b.d || a.o.id - b.o.id);
+      for (const { o } of cands) {
+        if ((deg.get(n.id) ?? 0) >= 2) break;
+        if (addEscooterEdge(n, o)) deg = degOf();
+      }
+    }
+    const stationSet = new Set(edges.filter(e => e.modes.includes('TRAIN')).flatMap(e => [e.from, e.to]));
+    let pruned = 0;
+    for (let pass = 0; pass < 5; pass++) {
+      deg = degOf();
+      const drop = new Set(nodes.filter(n => (deg.get(n.id) ?? 0) < 2 && !stationSet.has(n.id)).map(n => n.id));
+      if (!drop.size) break;
+      pruned += drop.size;
+      edges = edges.filter(e => !drop.has(e.from) && !drop.has(e.to));
+      nodes = nodes.filter(n => !drop.has(n.id));
+    }
+    __mcStats.finalPruned = pruned;
+    rebuildUsedSegs();
   }
 
   refreshSources();

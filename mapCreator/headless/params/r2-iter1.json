@@ -1,0 +1,28 @@
+{
+  "busClusters": [
+    { "name": "Wellington", "center": [174.776, -41.286], "radiusM": 2800, "count": 40 },
+    { "name": "Lower Hutt", "center": [174.908, -41.213], "radiusM": 3200, "count": 36 },
+    { "name": "Johnsonville", "center": [174.804, -41.228], "radiusM": 2000, "count": 25 },
+    { "name": "Porirua", "center": [174.843, -41.137], "radiusM": 2400, "count": 25 },
+    { "name": "Upper Hutt", "center": [175.055, -41.132], "radiusM": 2500, "count": 18 }
+  ],
+  "escooterClusters": [
+    { "name": "Wellington", "center": [174.776, -41.286], "radiusM": 2500, "count": 54 },
+    { "name": "Lower Hutt", "center": [174.908, -41.213], "radiusM": 2800, "count": 47 },
+    { "name": "Johnsonville", "center": [174.804, -41.228], "radiusM": 1800, "count": 36 },
+    { "name": "Porirua", "center": [174.843, -41.137], "radiusM": 2000, "count": 29 },
+    { "name": "Upper Hutt", "center": [175.055, -41.132], "radiusM": 2200, "count": 14 }
+  ],
+  "busExtraNN": 2,
+  "escooterExtraNN": 3,
+  "escooterPromoteMaxM": 900,
+  "stitchStationsMaxM": 2500,
+  "stitchStationsDegree": 2,
+  "bridgeComponentsMaxM": 4000,
+  "exclusiveExemptEndM": 150,
+  "drivebyCorridorM": 120,
+  "drivebyCorridorTrainM": 150,
+  "drivebySplitDepth": 3,
+  "minVertexDeg": 3,
+  "roadExclusive": true
+}
