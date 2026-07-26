@@ -10,7 +10,7 @@
 | Backend framework | Java 21 + Spring Boot 3 |
 | Real-time comms | STOMP over SockJS (Spring WebSocket) |
 | Build tools | Vite (frontend), Maven (backend) |
-| Containerisation | Docker (frontend + backend as separate containers) |
+| Containerisation | Docker (single container, two processes under `supervisord`: Spring Boot on `:8999`, nginx on `:80` serving the built frontend and reverse-proxying `/api` and `/ws` to the backend — see `Dockerfile`, `docker/`) |
 
 ---
 
@@ -170,7 +170,7 @@ Browser (Vue.js + Pinia + MapLibre GL)
 - All authoritative game state lives in memory on the server. The client holds only a display copy received via WebSocket.
 - `map.json` is served as a static file — the frontend fetches it once on page load.
 - No database in v1. Restarting the server terminates all active games.
-- Spring Boot serves the compiled Vue frontend from `src/main/resources/static/`.
+- In the Docker deployment, nginx serves the compiled Vue frontend and reverse-proxies `/api` and `/ws` to Spring Boot in the same container (see the Containerisation row above). For local development, the Vite dev server proxies the same paths instead (`frontend/vite.config.ts`).
 
 ---
 
