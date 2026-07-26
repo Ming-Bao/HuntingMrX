@@ -1,4 +1,4 @@
-# Scotland Yard — Implementation Specification
+# Hunting Mr. X: Wellington Edition — Implementation Specification
 
 ## 1. Tech Stack
 
@@ -348,7 +348,7 @@ Layout: vertically centred, full-viewport-height, `bg-gray-950`.
 Structure (top → bottom, centred):
 
 1. **Hero block**
-   - Title: "Scotland Yard" — white, `text-4xl font-bold`
+   - Title: "Hunting Mr. X" — white, `text-4xl font-bold`
    - Subtitle: "Wellington Edition" — `text-blue-400`, lighter weight
    - Tagline: "Hunt down Mr. X across Wellington's streets" — `text-gray-400 text-sm`
 

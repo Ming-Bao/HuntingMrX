@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ENGR489 capstone project: a web-based multiplayer Scotland Yard game overlaid on a real-world map of the Wellington region. Players are assigned roles (Mr X or Detectives), move between graph nodes on the Wellington map using transport tickets, and win by catching or evading each other over 24 rounds.
+ENGR489 capstone project: **Hunting Mr. X: Wellington Edition** — a web-based multiplayer hidden-movement game overlaid on a real-world map of the Wellington region. Players are assigned roles (Mr X or Detectives), move between graph nodes on the Wellington map using transport tickets, and win by catching or evading each other over 24 rounds.
 
-The repo is currently in the design and evaluation phase. Implementation has not yet started — the codebase contains only documentation, planning artefacts, and map API evaluation tooling.
+**Naming note**: the game mechanics are based on the board game *Scotland Yard* by Ravensburger. Ravensburger granted permission to use the mechanics for this non-commercial academic project, but the "Scotland Yard" name/brand must not be used in the project (code, docs, UI, or public references) — hence "Hunting Mr. X: Wellington Edition". Do not reintroduce "Scotland Yard" as a name anywhere in this repo; it may still appear in historical/submitted documents under `documentation/project_proposal/`, which are left as-is since they're the record of what was originally submitted.
+
+Implementation is well underway. The backend is a Spring Boot app (`backend/`) with a working game engine — REST + WebSocket controllers, game/lobby/turn models, ticket and move validation, and unit/e2e tests. The frontend is a Vue 3 + Vite + Pinia + Tailwind app (`frontend/`) with lobby and game views, a Pinia store, and a MapLibre GL map wired to the backend's map data over STOMP/WebSocket. `documentation/openapi.yaml` tracks the live REST + WebSocket surface as it evolves (see the sync rule below).
 
 ## Running the Map API Benchmark
 
@@ -24,13 +26,13 @@ To include Google Maps: create `documentation/test_map_api/googlemaps/env` conta
 GOOGLE_MAPS_API_KEY=your_key_here
 ```
 
-## Architecture (Planned)
+## Architecture
 
 **Client–server, real-time WebSocket communication.**
 
-- **Backend**: game engine enforcing Scotland Yard rules — player roles, turn management, movement validation, ticket tracking, win conditions, session management.
-- **Frontend**: browser-based map UI allowing players to view available moves, select transport, and track game state.
-- **Map layer**: GeoJSON-backed (not routing-API-based). API routing was ruled out early — too costly and too slow for the number of edges required. Pre-computed paths stored as GeoJSON are served statically.
+- **Backend**: Spring Boot game engine enforcing the game rules — player roles, turn management, movement validation, ticket tracking, win conditions, session management (`GameService`, `MapGraph`, `GameController`, `WebSocketConfig`).
+- **Frontend**: Vue 3 map UI (MapLibre GL) allowing players to view available moves, select transport, and track game state, backed by a Pinia store and STOMP over WebSocket.
+- **Map layer**: static graph JSON (`map.json`/`test-map.json`), not routing-API-based. API routing was ruled out early — too costly and too slow for the number of edges required. The map graph is served statically and loaded by `MapGraph` at startup.
 
 ## Game State Machine
 
@@ -44,7 +46,7 @@ Documented in `documentation/plans/states-diagrams.md`:
 
 ## Key Design Decisions
 
-- **Map library**: Under evaluation (Google Maps, Leaflet, MapLibre GL). Decision to be driven by render-time benchmarks and licensing.
+- **Map library**: Decided — MapLibre GL, wired into the frontend (`frontend/package.json`). Chosen after benchmarking against Google Maps and Leaflet (see `documentation/test_map_api/`).
 - **Routing**: GeoJSON pre-computed paths preferred over live routing APIs — APIs are too expensive per-request and too slow for hundreds of node-to-node edges.
 - **Turn timers**: Server-side auto-skip on `TurnTimerExpired` so gameplay advances even if a player is idle.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Map-quality evaluator for generated Scotland Yard maps.
+"""Map-quality evaluator for generated Hunting Mr. X maps.
 
 Usage:
     python3 evaluate_map.py candidate.json [--report report.json]
@@ -638,7 +638,7 @@ def evaluate(data, driveby_corridor_m=DEFAULT_DRIVEBY_CORRIDOR_M,
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Evaluate a Scotland Yard map JSON.")
+    ap = argparse.ArgumentParser(description="Evaluate a Hunting Mr. X map JSON.")
     ap.add_argument("candidate", help="path to candidate map JSON")
     ap.add_argument("--report", help="write JSON report to this path")
     ap.add_argument("--driveby-corridor", type=float, default=DEFAULT_DRIVEBY_CORRIDOR_M,

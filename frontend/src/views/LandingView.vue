@@ -2,7 +2,7 @@
   <div class="page">
     <div class="hero">
       <div class="hero-text">
-        <h1 class="title">Scotland Yard</h1>
+        <h1 class="title">Hunting Mr. X</h1>
         <p class="subtitle">Wellington Edition</p>
         <p class="tagline">Hunt down Mr. X across Wellington's streets</p>
       </div>
@@ -17,6 +17,12 @@
           Join Game
         </RouterLink>
       </div>
+
+      <p class="attribution">
+        Game mechanics based on the board game by Ravensburger. This is a
+        non-commercial student project and is not affiliated with or
+        endorsed by Ravensburger.
+      </p>
     </div>
 
     <!-- Dev nav -->
@@ -58,6 +64,9 @@ import { Users, UserPlus } from 'lucide-vue-next'
 }
 .tagline {
   @apply text-gray-600 dark:text-gray-400 text-sm;
+}
+.attribution {
+  @apply text-gray-400 dark:text-gray-600 text-xs max-w-xs mx-auto;
 }
 .btn-group {
   @apply flex flex-col gap-3;

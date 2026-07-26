@@ -20,7 +20,7 @@ The server starts on `http://localhost:8080`.
 
 ```bash
 mvn package
-java -jar target/ScotlandYard-0.0.1-SNAPSHOT.jar
+java -jar target/hunting-mrx-wellington-backend-0.0.1-SNAPSHOT.jar
 ```
 
 ## Configuration

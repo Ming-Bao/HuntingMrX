@@ -864,7 +864,7 @@ function saveMap() {
 
   const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
-  Object.assign(document.createElement('a'), { href: url, download: 'scotland-yard-map.json' }).click();
+  Object.assign(document.createElement('a'), { href: url, download: 'hunting-mrx-map.json' }).click();
   URL.revokeObjectURL(url);
   setStatus(`Saved — ${nodes.length} nodes, ${edges.length} edges`);
 }

@@ -8,10 +8,10 @@
 		<version>4.0.6</version>
 		<relativePath/> 
 	</parent>
-	<groupId>com.scotlandyard</groupId>
-	<artifactId>scotland-yard-backend</artifactId>
+	<groupId>com.huntingmrxwellington</groupId>
+	<artifactId>hunting-mrx-wellington-backend</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>ScotlandYard</name>
+	<name>HuntingMrXWellington</name>
 	<description/>
 	<url/>
 	<licenses>

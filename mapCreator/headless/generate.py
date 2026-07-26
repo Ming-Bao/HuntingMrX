@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless Selenium harness for the Scotland Yard map creator.
+"""Headless Selenium harness for the Hunting Mr. X map creator.
 
 Drives mapCreator/map-creator.html in headless Firefox to generate a game map
 JSON without manual clicking. Generation parameters can be injected via

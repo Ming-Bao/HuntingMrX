@@ -4,7 +4,7 @@
     <div class="header">
       <div class="header-left">
         <RouterLink to="/" class="back-btn"><ArrowLeft :size="18" /></RouterLink>
-        <h1 class="game-title">Scotland Yard</h1>
+        <h1 class="game-title">Hunting Mr. X</h1>
         <span class="game-subtitle">Wellington Edition</span>
         <span v-if="store.myRole" class="role-badge" :class="store.myRole === 'MR_X' ? 'role-badge--mrx' : 'role-badge--detective'">
           {{ store.myRole === 'MR_X' ? 'Mr. X' : 'Detective' }}

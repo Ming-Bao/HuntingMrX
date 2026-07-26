@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
-  title: Scotland Yard Wellington API
+  title: Hunting Mr. X Wellington Edition API
   description: |
-    REST API for the Scotland Yard Wellington multiplayer game backend.
+    REST API for the Hunting Mr. X: Wellington Edition multiplayer game backend.
 
     ## Real-time updates (WebSocket / STOMP)
 
@@ -32,7 +32,7 @@ info:
     **Kick detection** — a client should check on each push whether
     their own `playerId` is still present in `players`. If it is not
     and `phase` is still `LOBBY`, the client was kicked.
-  version: 0.1.7
+  version: 0.1.8
 servers:
   - url: http://localhost:8080
     description: Local development server
