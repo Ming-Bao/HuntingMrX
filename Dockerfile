@@ -3,6 +3,8 @@
 # Self-contained build: clones the repo at build time rather than using the
 # local build context, so `docker build` only needs this file to produce a
 # runnable image. Override REPO_URL/GIT_REF to build a different fork/ref.
+# Repo was renamed from Scotland-Yard to HuntingMrX on GitHub — if this
+# clone starts failing, check whether it's moved again.
 #
 #   docker build --build-arg GIT_REF=v0.1.0 -t hunting-mrx-wellington:v0.1.0 .
 #
@@ -19,7 +21,7 @@
 
 # ---- Stage 1: fetch source --------------------------------------------------
 FROM alpine/git:latest AS clone
-ARG REPO_URL=https://github.com/Ming-Bao/Scotland-Yard.git
+ARG REPO_URL=https://github.com/Ming-Bao/HuntingMrX.git
 ARG GIT_REF=main
 WORKDIR /src
 RUN git clone --branch "${GIT_REF}" --depth 1 "${REPO_URL}" .
