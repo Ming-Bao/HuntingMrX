@@ -83,11 +83,13 @@ Both moves occur before any detective moves. Detectives see two `MrXLogEntry` ro
 
 The `isDoubleFirst` flag on `MrXLogEntry` distinguishes the first leg from the second.
 
-### 2.7 Black Ticket
+### 2.7 Invisible Ticket
+
+Displayed to players as the **Invisible ticket** (wire value `BLACK`, kept from the original ticket colour naming).
 
 Mr X submits `{toNodeId, ticket: BLACK}`. The move is valid on **any edge regardless of mode** — Mr X does not need a matching transport ticket. One `BLACK` ticket is consumed.
 
-Detectives see `BLACK` in the log. The actual destination is hidden on non-reveal rounds. On reveal rounds the destination is still revealed, but the ticket type still shows as `BLACK`.
+Detectives see the Invisible ticket (`BLACK`) in the log. The actual destination is hidden on non-reveal rounds. On reveal rounds the destination is still revealed, but the ticket type still shows as Invisible.
 
 ### 2.8 Win Conditions
 
@@ -101,7 +103,7 @@ Detectives see `BLACK` in the log. The actual destination is hidden on non-revea
 
 - Mr X **cannot** move to a node currently occupied by any detective.
 - Multiple detectives **may** occupy the same node simultaneously.
-- A player must hold at least one ticket matching a mode on the chosen edge (or use a BLACK ticket as Mr X).
+- A player must hold at least one ticket matching a mode on the chosen edge (or use an Invisible ticket as Mr X).
 - A detective with zero valid moves from their current node is automatically skipped — no ticket is consumed.
 
 ---
@@ -409,7 +411,7 @@ Two sequential phases on the same route, controlled by local component state.
 
 **Ticket selector (modal/popover):**
 - Shows only tickets the player holds that are valid for at least one mode on the chosen edge.
-- Mr X additionally sees DOUBLE (if available) and BLACK (if available).
+- Mr X additionally sees DOUBLE (if available) and Invisible (if available).
 - Confirming a selection calls `POST /api/games/{id}/moves`.
 
 **Info panel (sidebar):**

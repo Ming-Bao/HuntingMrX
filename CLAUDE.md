@@ -8,6 +8,8 @@ ENGR489 capstone project: **Hunting Mr. X: Wellington Edition** — a web-based 
 
 **Naming note**: the game mechanics are based on the board game *Scotland Yard* by Ravensburger. Ravensburger granted permission to use the mechanics for this non-commercial academic project, but the "Scotland Yard" name/brand must not be used in the project (code, docs, UI, or public references) — hence "Hunting Mr. X: Wellington Edition". Do not reintroduce "Scotland Yard" as a name anywhere in this repo; it may still appear in historical/submitted documents under `documentation/project_proposal/`, which are left as-is since they're the record of what was originally submitted.
 
+**Ticket naming note**: the `BLACK` ticket (`TicketType.BLACK` in code, `TicketType` enum in `openapi.yaml`) is shown to players as the **Invisible ticket**. The wire/enum value stays `BLACK` — only the player-facing name changed (see `frontend/src/utils/transportModes.ts` for the existing label mapping). Docs should say "Invisible ticket" in prose and reserve `BLACK` for literal enum/wire-value references.
+
 Implementation is well underway. The backend is a Spring Boot app (`backend/`) with a working game engine — REST + WebSocket controllers, game/lobby/turn models, ticket and move validation, and unit/e2e tests. The frontend is a Vue 3 + Vite + Pinia + Tailwind app (`frontend/`) with lobby and game views, a Pinia store, and a MapLibre GL map wired to the backend's map data over STOMP/WebSocket. `documentation/openapi.yaml` tracks the live REST + WebSocket surface as it evolves (see the sync rule below).
 
 ## Running the Map API Benchmark
@@ -84,6 +86,8 @@ Do **not** skip this step even for small changes. The OpenAPI file is the single
 - `documentation/test_map_api/` — map library benchmarks, timing results, per-library notes
 - `documentation/project_proposal/` — original proposal (LaTeX source + PDFs)
 - `documentation/spec.md` — living spec
+- `backend/doc.md` — backend setup/run guide (lives next to the code it documents, not under `documentation/`)
+- `frontend/doc.md` — frontend setup/run guide (same reasoning)
 
 ## Planned Evaluation Methods
 

@@ -32,7 +32,7 @@ info:
     **Kick detection** — a client should check on each push whether
     their own `playerId` is still present in `players`. If it is not
     and `phase` is still `LOBBY`, the client was kicked.
-  version: 0.1.8
+  version: 0.1.9
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -190,8 +190,8 @@ paths:
         call this. Requires at least 2 players.
 
         One player is randomly assigned `MR_X` (unlimited transport tickets,
-        2 DOUBLE, N BLACK where N = detective count); the rest become `DETECTIVE`
-        (finite ticket counts from server config).
+        2 DOUBLE, N BLACK/"Invisible" where N = detective count); the rest
+        become `DETECTIVE` (finite ticket counts from server config).
 
         Broadcasts the updated `GameStateDTO` to `/topic/games/{gameId}` — all
         lobby subscribers detect `phase: IN_PROGRESS` and navigate to the game
@@ -668,7 +668,8 @@ components:
             type: string
           description: |
             Ticket types the player may use to reach this node.
-            For Mr X may include `DOUBLE` (on normal turns) and `BLACK`.
+            For Mr X may include `DOUBLE` (on normal turns) and `BLACK`
+            (shown to players as "Invisible").
             For detectives, only the transport modes of the connecting edge.
 
     ValidMovesDTO:
@@ -813,6 +814,10 @@ components:
     TicketType:
       type: string
       enum: [ESCOOTER, BUS, TRAIN, FERRY, BLACK, DOUBLE]
+      description: |
+        `BLACK` is shown to players as the **Invisible** ticket — it lets
+        Mr X travel any edge, any mode, without needing a matching transport
+        ticket or revealing which mode was actually used.
 
     MapData:
       type: object

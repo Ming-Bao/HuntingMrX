@@ -6,7 +6,7 @@ Vue 3 · Vite 6 · TypeScript · Tailwind CSS 4 · Pinia
 
 - **Node.js 18+** — verify with `node -v`
 - **npm 9+** — verify with `npm -v`
-- **Backend running** on `http://localhost:8080` (see `backend/doc.md`)
+- **Backend running** on `http://localhost:8999` (see `backend/doc.md`)
 
 ## Install dependencies
 

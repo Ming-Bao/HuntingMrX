@@ -14,7 +14,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-The server starts on `http://localhost:8080`.
+The server starts on `http://localhost:8999`.
 
 ## Build (production jar)
 
@@ -29,7 +29,7 @@ Settings are in `src/main/resources/application.properties`:
 
 | Property | Default | Description |
 |---|---|---|
-| `server.port` | `8080` | HTTP port |
+| `server.port` | `8999` | HTTP port |
 | `game.grace-period-seconds` | `60` | Disconnection grace period before game is aborted |
 | `game.turn-timer-seconds` | `120` | Auto-skip a player's turn after this many seconds |
 | `game.detective-escooter-tickets` | `10` | Escooter tickets per detective |
@@ -51,12 +51,12 @@ All endpoints return `400` with `{ "error": "..." }` on invalid input.
 
 ```bash
 # Create a game
-curl -s -X POST http://localhost:8080/api/games \
+curl -s -X POST http://localhost:8999/api/games \
   -H 'Content-Type: application/json' \
   -d '{"hostName":"Alice","maxPlayers":4}' | jq .
 
 # Join with the joinCode from the response above
-curl -s -X POST http://localhost:8080/api/games/join \
+curl -s -X POST http://localhost:8999/api/games/join \
   -H 'Content-Type: application/json' \
   -d '{"joinCode":"<code>","playerName":"Bob"}' | jq .
 ```

@@ -23,7 +23,7 @@ One player is **Mr X**. Everyone else is a **Detective**. Mr X's position is hid
 Movement runs on four transport modes, each tied to a ticket and a colour on the map:
 
 | Mode | Ticket |
-|---|---|---|
+|---|---|
 | E-scooter | `ESCOOTER` |
 | Bus | `BUS` |
 | Train | `TRAIN` |
@@ -31,7 +31,7 @@ Movement runs on four transport modes, each tied to a ticket and a colour on the
 
 A move needs a ticket matching the mode of the edge being crossed. Detectives hold a fixed budget per game (10 escooter / 8 bus / 4 train / 2 ferry, configurable) and never get more — spend them badly and you're stuck. Mr X never runs out of the four regular tickets, but also holds a small number of two special ones:
 
-- **`INVISIBLE`** — travel any edge, any mode, no matching ticket required. Detectives see that a black ticket was used, never which mode it disguised.
+- **`INVISIBLE`** — travel any edge, any mode, no matching ticket required. Detectives see that an invisible ticket was used, never which mode it disguised.
 - **`DOUBLE`** — take two moves in one turn before any detective responds. Rare (2 per game) and the only way to put real distance between two reveals.
 
 **Reveal rounds** are fixed: 3, 8, 13, 18, 24. At the start of Mr X's turn on those rounds, his node is broadcast to every detective and logged. Between reveals he's a ticket trail and nothing else.
@@ -60,7 +60,7 @@ All authoritative state lives server-side in memory — no database, restarting 
 
 | Layer | Technology |
 |---|---|
-| Frontend | Vue 3 Vite, Tailwind CSS, TypeScript |
+| Frontend | Vue 3, Vite, Tailwind CSS, TypeScript |
 | Map | MapLibre GL |
 | Backend | Java 21, Spring Boot 3, Maven |
 | Real-time | Websocket |
@@ -73,7 +73,7 @@ All authoritative state lives server-side in memory — no database, restarting 
 **Backend** (serves the API on `:8999`):
 
 ```bash
-cd backe
+cd backend
 mvn spring-boot:run
 ```
 
@@ -99,7 +99,9 @@ mvn test              # unit + lifecycle tests
 mvn test -Dtest=FullGameE2ETest   # end-to-end, drives the real API over HTTP via a headless Firefox
 ```
 
-The end-to-end suite requires Firefox and `geckodriver` on the host — see `backend/doc.md` for setup. Set `-De2e.headless=false` to watch the browser drive the game instead of running it headless.
+The end-to-end suite requires Firefox and `geckodriver` on the host — see [`backend/doc.md`](backend/doc.md) for setup. Set `-De2e.headless=false` to watch the browser drive the game instead of running it headless.
+
+---
 
 ## License & attribution
 
