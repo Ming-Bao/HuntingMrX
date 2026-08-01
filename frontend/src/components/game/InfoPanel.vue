@@ -15,8 +15,16 @@
       </div>
     </div>
 
-    <!-- Tickets -->
-    <TicketGrid :tickets="tickets" />
+    <!-- Tickets (double-ticket declare/status lives inside this section) -->
+    <TicketGrid
+      :tickets="tickets"
+      :is-my-turn="isMyTurn"
+      :has-double-ticket="hasDoubleTicket"
+      :double-mode="doubleMode"
+      :mr-x-double-move-pending="mrXDoubleMovePending"
+      @declare-double="$emit('declare-double')"
+      @cancel-double="$emit('cancel-double')"
+    />
 
     <!-- Mr X Log -->
     <MrXLog :log="mrXLog" />
@@ -41,20 +49,6 @@
           >{{ modeLabel(mode) }}</span>
         </span>
       </div>
-    </div>
-
-    <!-- Double ticket declare / status -->
-    <div v-if="isMyTurn && hasDoubleTicket && !mrXDoubleMovePending" class="panel-section double-declare">
-      <div v-if="!doubleMode" class="double-idle">
-        <button class="double-btn" @click="$emit('declare-double')">Use Double Ticket</button>
-      </div>
-      <div v-else class="double-active-row">
-        <span class="double-active-label">Double Move — Leg 1</span>
-        <button class="cancel-btn" @click="$emit('cancel-double')">Cancel</button>
-      </div>
-    </div>
-    <div v-if="isMyTurn && mrXDoubleMovePending" class="panel-section double-leg2">
-      Double Move — Leg 2
     </div>
 
     <!-- Move selector -->
@@ -145,7 +139,7 @@ function uniqueTransports(ticketOptions: string[]): string[] {
   @apply flex items-center gap-2;
 }
 .player-dot {
-  @apply w-3 h-3 rounded-full;
+  @apply w-3 h-3 rounded-full border border-white/30 dark:border-white/20;
 }
 .player-name {
   @apply text-base text-gray-900 dark:text-white;
@@ -158,23 +152,6 @@ function uniqueTransports(ticketOptions: string[]): string[] {
 }
 .waiting-msg {
   @apply px-4 py-3 text-sm text-gray-500 dark:text-gray-600 italic;
-}
-.double-declare { @apply py-3 px-4; }
-.double-idle { @apply flex; }
-.double-btn {
-  @apply w-full py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors;
-}
-.double-active-row {
-  @apply flex items-center justify-between;
-}
-.double-active-label {
-  @apply text-sm font-semibold text-amber-400;
-}
-.cancel-btn {
-  @apply text-xs text-gray-400 hover:text-white transition-colors underline;
-}
-.double-leg2 {
-  @apply py-2 px-4 text-sm font-semibold text-amber-400 bg-amber-900/20;
 }
 .reachable-section {
   @apply max-h-48 overflow-y-auto;

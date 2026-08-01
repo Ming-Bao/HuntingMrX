@@ -7,12 +7,37 @@
         <span class="ticket-count">{{ ticket.count < 0 ? '∞' : ticket.count }}</span>
       </div>
     </div>
+
+    <!-- Double-ticket action lives with the ticket it spends, instead of as
+         its own separate sidebar section further down. -->
+    <div v-if="isMyTurn && hasDoubleTicket && !mrXDoubleMovePending" class="double-action">
+      <button v-if="!doubleMode" class="double-btn" @click="$emit('declare-double')">Use Double Ticket</button>
+      <div v-else class="double-active-row">
+        <span class="double-active-label">Double Move — Leg 1</span>
+        <button class="cancel-btn" @click="$emit('cancel-double')">Cancel</button>
+      </div>
+    </div>
+    <div v-if="isMyTurn && mrXDoubleMovePending" class="double-leg2">
+      Double Move — Leg 2
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { DemoTicket } from '../../types/game'
-defineProps<{ tickets: DemoTicket[] }>()
+
+defineProps<{
+  tickets: DemoTicket[]
+  isMyTurn: boolean
+  hasDoubleTicket: boolean
+  doubleMode: boolean
+  mrXDoubleMovePending: boolean
+}>()
+
+defineEmits<{
+  'declare-double': []
+  'cancel-double': []
+}>()
 </script>
 
 <style scoped>
@@ -36,5 +61,23 @@ defineProps<{ tickets: DemoTicket[] }>()
 }
 .ticket-count {
   @apply text-gray-900 dark:text-white text-base font-mono font-bold;
+}
+.double-action {
+  @apply mt-2;
+}
+.double-btn {
+  @apply w-full py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors;
+}
+.double-active-row {
+  @apply flex items-center justify-between;
+}
+.double-active-label {
+  @apply text-sm font-semibold text-amber-500 dark:text-amber-400;
+}
+.cancel-btn {
+  @apply text-xs text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors underline;
+}
+.double-leg2 {
+  @apply mt-2 py-2 px-3 rounded-lg text-sm font-semibold text-amber-500 dark:text-amber-400 bg-amber-600/10;
 }
 </style>

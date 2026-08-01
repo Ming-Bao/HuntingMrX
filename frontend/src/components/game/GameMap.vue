@@ -55,6 +55,23 @@ function flyToMyNode() {
   map.flyTo({ center: [myNode.value.lng, myNode.value.lat], zoom: Math.max(map.getZoom(), 15) })
 }
 
+// Auto-center on the player's own node the moment it's known, once — the map
+// starts on a wide Wellington-wide view because node/player data hasn't
+// loaded yet at construction time, so this catches the first moment it has.
+// Guarded to fire only once so it doesn't yank the camera on every later move
+// (the jump button above covers re-centering after that).
+const hasAutoCentered = ref(false)
+watch(myNode, node => {
+  if (!map || !node || hasAutoCentered.value) return
+  hasAutoCentered.value = true
+  const target = { center: [node.lng, node.lat] as [number, number], zoom: Math.max(map.getZoom(), 15) }
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    map.jumpTo(target)
+  } else {
+    map.flyTo({ ...target, essential: true })
+  }
+})
+
 // ── Always-on connected-node exploration highlight ─────────────────────────────
 // Independent of props.selectedNode (which is turn-gated by the parent) — this
 // lets clicking any node, on any turn, highlight its direct graph neighbors.
@@ -150,49 +167,36 @@ function makePieIcon(modes: string[], isSelected = false): ImageData {
   return ctx.getImageData(0, 0, SIZE, SIZE)
 }
 
-// Ring icon for player-occupied nodes — draws colored arc segments per transport
-// mode. The center is transparent so the player-color circle layer shows through.
-function makeOccupiedRingIcon(modes: string[]): ImageData {
+// Ring icon for player-occupied nodes. Deliberately mode-agnostic: transport
+// colors are what the other 260 nodes are made of, so reusing them here made
+// player markers blend into the network instead of popping out of it at low
+// zoom. A flat white ring + black hairline reads as "a person is here" against
+// any basemap or surrounding clutter, independent of which lines pass through.
+// The center stays transparent so the player-color circle layer shows through.
+function makeOccupiedRingIcon(): ImageData {
   const SIZE = 48
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = SIZE
   const ctx = canvas.getContext('2d')!
   const cx = SIZE / 2
-  const outerR   = SIZE / 2 - 2   // matches the pie icon's outer radius
-  const ringWidth = 6
-  const ringMid   = outerR - ringWidth / 2
+  const outerR    = SIZE / 2 - 2   // matches the pie icon's outer radius
+  const ringWidth = 7
 
-  if (modes.length === 0) {
-    ctx.beginPath()
-    ctx.arc(cx, cx, ringMid, 0, Math.PI * 2)
-    ctx.strokeStyle = '#ffffff'
-    ctx.lineWidth = ringWidth
-    ctx.stroke()
-  } else {
-    const step = (Math.PI * 2) / modes.length
-    let angle = -Math.PI / 2
-    for (const mode of modes) {
-      ctx.beginPath()
-      ctx.arc(cx, cx, ringMid, angle, angle + step)
-      ctx.strokeStyle = MODE_COLORS[mode] ?? '#6b7280'
-      ctx.lineWidth = ringWidth
-      ctx.stroke()
-      angle += step
-    }
-  }
-
-  // Separator: thin ring between player fill and mode arcs
   ctx.beginPath()
-  ctx.arc(cx, cx, outerR - ringWidth, 0, Math.PI * 2)
+  ctx.arc(cx, cx, outerR - ringWidth / 2, 0, Math.PI * 2)
   ctx.strokeStyle = '#ffffff'
-  ctx.lineWidth = 1.8
+  ctx.lineWidth = ringWidth
   ctx.stroke()
 
-  // Outer border — matches the pie chart node border
+  // Black hairline on both edges of the white ring — keeps it legible against
+  // light basemaps (Positron/Voyager) as well as the default dark style.
+  ctx.lineWidth = 1.5
+  ctx.strokeStyle = '#000000'
   ctx.beginPath()
   ctx.arc(cx, cx, outerR, 0, Math.PI * 2)
-  ctx.strokeStyle = '#ffffff'
-  ctx.lineWidth = 3
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(cx, cx, outerR - ringWidth, 0, Math.PI * 2)
   ctx.stroke()
 
   return ctx.getImageData(0, 0, SIZE, SIZE)
@@ -266,9 +270,10 @@ function registerIcons() {
     const key   = modesKey(new Set(modes))
     addImageIfMissing(`node-${key}`,           makePieIcon(modes))
     addImageIfMissing(`node-${key}-selected`,  makePieIcon(modes, true))
-    // Occupied variant: colored ring, transparent fill
-    addImageIfMissing(`node-occupied-${key}`,  makeOccupiedRingIcon(modes))
   }
+  // Occupied nodes all share one icon — a neutral ring, deliberately not
+  // colored by transport mode (see makeOccupiedRingIcon).
+  addImageIfMissing('node-occupied', makeOccupiedRingIcon())
   addImageIfMissing('role-detective', makeRoleIcon('DETECTIVE'))
   addImageIfMissing('role-mrx',       makeRoleIcon('MR_X'))
 }
@@ -307,7 +312,7 @@ function nodeGeoJSON() {
           e => (e.from === myNode && e.to === n.id) ||
                (e.to   === myNode && e.from === n.id)
         ))
-      const iconKey = isPlayer   ? `node-occupied-${key}`
+      const iconKey = isPlayer   ? 'node-occupied'
                     : isSelected ? `node-${key}-selected`
                     : `node-${key}`
       const dimmed = exploreNode.value != null &&
@@ -408,7 +413,7 @@ function setupLayers() {
     source: 'nodes',
     filter: ['==', ['get', 'isPlayer'], true],
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 13, 15, 17, 18, 25],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 21, 15, 24, 18, 29],
       'circle-color': ['get', 'playerColor'],
       'circle-opacity': DIMMED_OPACITY_CASE as any,
     },
@@ -427,7 +432,7 @@ function setupLayers() {
         'DETECTIVE', 'role-detective',
         'role-detective',
       ],
-      'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.72, 15, 1.0, 18, 1.6],
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 1.15, 15, 1.4, 18, 1.9],
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
     },
@@ -436,7 +441,9 @@ function setupLayers() {
     },
   })
 
-  // Pie chart node icons — zoom-interpolated size; player node rendered larger
+  // Pie chart node icons — zoom-interpolated size; player nodes rendered
+  // noticeably larger so they still pop out even when zoomed out across the
+  // full 261-node map, where plain nodes are dense and easy to lose a marker in.
   map.addLayer({
     id: 'nodes',
     type: 'symbol',
@@ -444,9 +451,9 @@ function setupLayers() {
     layout: {
       'icon-image': ['get', 'iconKey'],
       'icon-size': ['interpolate', ['linear'], ['zoom'],
-        12, ['case', ['boolean', ['get', 'isPlayer'], false], 0.8,  0.55],
-        15, ['case', ['boolean', ['get', 'isPlayer'], false], 1.15, 0.85],
-        18, ['case', ['boolean', ['get', 'isPlayer'], false], 1.8,  1.4],
+        12, ['case', ['boolean', ['get', 'isPlayer'], false], 1.3,  0.55],
+        15, ['case', ['boolean', ['get', 'isPlayer'], false], 1.6, 0.85],
+        18, ['case', ['boolean', ['get', 'isPlayer'], false], 2.1,  1.4],
       ],
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
@@ -463,11 +470,17 @@ function setupLayers() {
     source: 'nodes',
     layout: {
       'text-field': ['to-string', ['get', 'id']],
-      'text-size': ['interpolate', ['linear'], ['zoom'], 12, 8, 15, 11, 18, 15],
+      // Player-node IDs get their own, less zoom-sensitive floor so they stay
+      // legible at a glance even zoomed out across the full 261-node map.
+      'text-size': ['interpolate', ['linear'], ['zoom'],
+        12, ['case', ['boolean', ['get', 'isPlayer'], false], 11, 8],
+        15, ['case', ['boolean', ['get', 'isPlayer'], false], 13, 11],
+        18, ['case', ['boolean', ['get', 'isPlayer'], false], 16, 15],
+      ],
       'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
       'text-anchor': 'center',
       'text-offset': ['case', ['boolean', ['get', 'isPlayer'], false],
-        ['literal', [0, 1.7]],
+        ['literal', [0, 2.1]],
         ['literal', [0, 0]],
       ],
       'text-allow-overlap': true,
@@ -475,11 +488,15 @@ function setupLayers() {
     },
     paint: {
       'text-color': '#ffffff',
+      'text-halo-color': '#000000',
+      'text-halo-width': 1.2,
       'text-opacity': DIMMED_OPACITY_CASE as any,
     },
   })
 
-  // Player name labels — shown above the node ID inside player nodes
+  // Player name labels — shown above the node ID inside player nodes. Halo +
+  // a higher zoomed-out size floor than a bare node label needs, since these
+  // have to stay readable against the busier map, not just legible up close.
   map.addLayer({
     id: 'node-player-names',
     type: 'symbol',
@@ -487,16 +504,18 @@ function setupLayers() {
     filter: ['==', ['get', 'isPlayer'], true],
     layout: {
       'text-field': ['get', 'playerName'],
-      'text-size': ['interpolate', ['linear'], ['zoom'], 12, 7, 15, 9, 18, 13],
+      'text-size': ['interpolate', ['linear'], ['zoom'], 12, 10, 15, 12, 18, 15],
       'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
       'text-anchor': 'center',
-      'text-offset': [0, -1.9],
+      'text-offset': [0, -2.3],
       'text-max-width': 5,
       'text-allow-overlap': true,
       'text-ignore-placement': true,
     },
     paint: {
       'text-color': '#ffffff',
+      'text-halo-color': '#000000',
+      'text-halo-width': 1.2,
       'text-opacity': DIMMED_OPACITY_CASE as any,
     },
   })

@@ -118,13 +118,19 @@ const ticketOptionsForSelected = computed<string[]>(() => {
 // Player colors for detectives (up to 5)
 const DETECTIVE_COLORS = ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#db2777']
 
+// Mr X's own color, deliberately outside the transport-mode palette (BUS is
+// also red, #ef4444 — sharing that hue made his marker read as just another
+// transport-colored node at low zoom). Near-black reads as "the shadow" and
+// can't be confused with any line/pie-icon color on the map.
+const MR_X_COLOR = '#18181b'
+
 const displayPlayers = computed<DemoPlayer[]>(() => {
   if (!gameState.value) return []
   let detIdx = 0
   return gameState.value.players.map(p => {
     const isMe = p.id === store.playerId
     if (p.role === 'MR_X') {
-      return { name: p.name, isYou: isMe, role: 'MR_X', node: p.nodeId, color: '#ef4444' }
+      return { name: p.name, isYou: isMe, role: 'MR_X', node: p.nodeId, color: MR_X_COLOR }
     } else {
       const color = DETECTIVE_COLORS[detIdx++ % DETECTIVE_COLORS.length]
       return { name: p.name, isYou: isMe, role: 'DETECTIVE', node: p.nodeId, color }
@@ -327,7 +333,17 @@ async function handleLeave() {
 }
 .turn-badge--mrx       { @apply bg-red-600/20 text-red-400; }
 .turn-badge--detective { @apply bg-blue-600/20 text-blue-400; }
-.turn-badge--mine      { @apply bg-green-600/20 text-green-400 font-semibold; }
+.turn-badge--mine      {
+  @apply bg-green-600/20 text-green-400 font-semibold;
+  animation: turn-pulse 1.4s ease-in-out infinite;
+}
+@keyframes turn-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+  50%      { box-shadow: 0 0 0 7px rgba(34, 197, 94, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-badge--mine { animation: none; }
+}
 .double-badge {
   @apply text-xs px-2 py-1 rounded-full bg-amber-600/20 text-amber-400 font-medium;
 }

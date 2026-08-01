@@ -2,8 +2,7 @@
   <div class="move-section">
     <template v-if="selectedNode">
       <p class="section-label">Move to</p>
-      <p class="node-name">{{ selectedNode.label }}</p>
-      <p class="node-id">Node {{ selectedNode.id }}</p>
+      <p class="node-name">{{ nodeDisplayName }}</p>
 
       <template v-if="reachable">
         <p class="ticket-prompt">Choose ticket</p>
@@ -38,10 +37,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { GraphNode } from '../../types/game'
 import { modeColor, modeLabel } from '../../utils/transportModes'
 
-defineProps<{
+const props = defineProps<{
   selectedNode: GraphNode | null
   availableModes: string[]
   selectedTicket: string | null
@@ -54,6 +54,15 @@ defineEmits<{
   'select-ticket': [mode: string]
   confirm: []
 }>()
+
+// Node labels are currently just the node's own id as a string (e.g. "42"),
+// so showing both the label and "Node 42" repeated the same number twice.
+// Only show the label separately once it actually carries a distinct name.
+const nodeDisplayName = computed(() => {
+  const node = props.selectedNode
+  if (!node) return ''
+  return node.label === String(node.id) ? `Node ${node.id}` : `${node.label} — Node ${node.id}`
+})
 </script>
 
 <style scoped>
@@ -67,10 +76,7 @@ defineEmits<{
   @apply text-sm text-gray-500 uppercase tracking-wider mb-1;
 }
 .node-name {
-  @apply text-gray-900 dark:text-white font-medium text-base mb-1;
-}
-.node-id {
-  @apply text-sm text-gray-500 font-mono mb-3;
+  @apply text-gray-900 dark:text-white font-medium text-base mb-3;
 }
 .ticket-prompt {
   @apply text-sm text-gray-500 mb-2;
