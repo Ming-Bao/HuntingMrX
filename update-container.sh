@@ -9,15 +9,12 @@ set -euo pipefail
 # Expects: ~/Scotland-Yard to be a clone of the repo (only its Dockerfile and
 # docker/ configs are read locally — the Dockerfile clones the actual app
 # source fresh from GitHub at GIT_REF, per its own build design).
-#
-# Usage (from wherever this script lives, e.g. ~/):
-#   ./update-container.sh            # deploy latest commit on main
-#   ./update-container.sh v0.2.0     # deploy a specific tag/branch/commit
 
 REPO_DIR="$HOME/Scotland-Yard"
 IMAGE_NAME="mrx"
 CONTAINER_NAME="mrx"
 GIT_REF="${1:-main}"
+PORT="${PORT:-8080}"
 
 cd "$REPO_DIR"
 
@@ -50,15 +47,16 @@ if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER_NAME}"; then
   docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 fi
 
-# 8080 on the host, matching the Cloudflare Tunnel route already configured
-# (Service URL: http://localhost:8080). Bound to 127.0.0.1 only — cloudflared
-# runs on this same box and reaches it over localhost, so there's no need to
-# expose this port beyond that.
+# Defaults to 8080, matching the Cloudflare Tunnel route already configured
+# (Service URL: http://localhost:8080) — override with PORT=... if the tunnel
+# route (or whatever's fronting this) points somewhere else. Bound to
+# 127.0.0.1 only — cloudflared runs on this same box and reaches it over
+# localhost, so there's no need to expose this port beyond that.
 docker run -d \
   --name "${CONTAINER_NAME}" \
   --restart unless-stopped \
-  -p 127.0.0.1:8080:80 \
+  -p "127.0.0.1:${PORT}:80" \
   "${IMAGE_NAME}:latest"
 
-echo "==> Done. Running ${IMAGE_NAME}:${RESOLVED_SHA}"
+echo "==> Done. Running ${IMAGE_NAME}:${RESOLVED_SHA} on port ${PORT}"
 docker ps --filter "name=${CONTAINER_NAME}"
