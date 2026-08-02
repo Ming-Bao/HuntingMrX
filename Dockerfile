@@ -24,7 +24,14 @@ FROM alpine/git:latest AS clone
 ARG REPO_URL=https://github.com/Ming-Bao/HuntingMrX.git
 ARG GIT_REF=main
 WORKDIR /src
-RUN git clone --branch "${GIT_REF}" --depth 1 "${REPO_URL}" .
+# `git clone --branch` only accepts a branch/tag name, not a raw commit SHA —
+# using init+fetch+checkout instead supports all three, since `git fetch`
+# (unlike `clone --branch`) can fetch an arbitrary reachable commit from
+# GitHub directly.
+RUN git init -q && \
+    git remote add origin "${REPO_URL}" && \
+    git fetch --depth 1 origin "${GIT_REF}" && \
+    git checkout -q FETCH_HEAD
 
 # ---- Stage 2: build the backend (Java 21 / Spring Boot / Maven) ------------
 FROM maven:3.9-eclipse-temurin-21 AS backend-build
