@@ -1,10 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import LandingView from '../views/LandingView.vue'
-import CreateGameView from '../views/CreateGameView.vue'
-import JoinGameView from '../views/JoinGameView.vue'
-import LobbyView from '../views/LobbyView.vue'
-import GameBoardView from '../views/GameBoardView.vue'
-import GameEndView from '../views/GameEndView.vue'
+
+// Lazy-loaded per route: GameBoardView pulls in maplibre-gl, which is the
+// single biggest dependency in this app (see the Vite "chunk larger than
+// 500 kB" build warning) — static imports here would put it in every page's
+// initial load, including the landing/create/join pages that never touch a
+// map. Dynamic import() gives each route its own chunk, fetched only when
+// actually navigated to.
+const LandingView   = () => import('../views/LandingView.vue')
+const CreateGameView = () => import('../views/CreateGameView.vue')
+const JoinGameView  = () => import('../views/JoinGameView.vue')
+const LobbyView     = () => import('../views/LobbyView.vue')
+const GameBoardView = () => import('../views/GameBoardView.vue')
+const GameEndView   = () => import('../views/GameEndView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
