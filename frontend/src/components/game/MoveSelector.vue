@@ -5,17 +5,9 @@
       <p class="node-name">{{ nodeDisplayName }}</p>
 
       <template v-if="reachable">
-        <p class="ticket-prompt">Choose ticket</p>
-        <div class="ticket-buttons">
-          <button
-            v-for="mode in availableModes"
-            :key="mode"
-            class="ticket-btn"
-            :class="{ 'ticket-btn--selected': selectedTicket === mode }"
-            :style="{ borderColor: modeColor(mode), color: modeColor(mode) }"
-            @click="$emit('select-ticket', mode)"
-          >{{ modeLabel(mode) }}</button>
-        </div>
+        <!-- Ticket is picked from the mode chips in the Reachable Nodes list
+             above, not here — this section just confirms it. -->
+        <p v-if="!selectedTicket" class="ticket-hint">Tap a transport ticket in Reachable Nodes above to continue</p>
         <p v-if="moveError" class="move-error-msg">{{ moveError }}</p>
         <button
           :disabled="!selectedTicket || submitting"
@@ -39,11 +31,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { GraphNode } from '../../types/game'
-import { modeColor, modeLabel } from '../../utils/transportModes'
 
 const props = defineProps<{
   selectedNode: GraphNode | null
-  availableModes: string[]
   selectedTicket: string | null
   reachable: boolean
   submitting: boolean
@@ -51,7 +41,6 @@ const props = defineProps<{
 }>()
 
 defineEmits<{
-  'select-ticket': [mode: string]
   confirm: []
 }>()
 
@@ -78,18 +67,8 @@ const nodeDisplayName = computed(() => {
 .node-name {
   @apply text-gray-900 dark:text-white font-medium text-base mb-3;
 }
-.ticket-prompt {
-  @apply text-sm text-gray-500 mb-2;
-}
-.ticket-buttons {
-  @apply flex flex-wrap gap-2 mb-3;
-}
-.ticket-btn {
-  @apply px-3 py-2 rounded-lg text-sm font-semibold border bg-transparent
-         hover:bg-black/5 dark:hover:bg-white/5 transition-colors;
-}
-.ticket-btn--selected {
-  @apply bg-black/10 dark:bg-white/10;
+.ticket-hint {
+  @apply text-sm text-gray-500 italic mb-2;
 }
 .confirm-btn {
   @apply w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed

@@ -70,7 +70,7 @@ The round counter increments after all detectives have moved (or been skipped).
 
 ### 2.5 Reveal Rounds
 
-At the **start** of Mr X's turn on rounds **3, 8, 13, 18, 24**, Mr X's current node is broadcast to all detectives. The node appears in `mrXLog` for that round and in the detective-view `PlayerDTO`.
+At the **start** of Mr X's turn on rounds **2, 8, 13, 18, 24**, Mr X's current node is broadcast to all detectives. The node appears in `mrXLog` for that round and in the detective-view `PlayerDTO`.
 
 ### 2.6 Double Move
 

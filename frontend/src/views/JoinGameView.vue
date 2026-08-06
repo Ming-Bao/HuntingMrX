@@ -27,18 +27,21 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { joinGame } from '../api/gameApi'
 import { useGameStore } from '../stores/gameStore'
 import PageHeader from '../components/ui/PageHeader.vue'
 import FormInput from '../components/ui/FormInput.vue'
 import ErrorBanner from '../components/ui/ErrorBanner.vue'
 
+const route = useRoute()
 const router = useRouter()
 const store = useGameStore()
 
 const playerName = ref('')
-const joinCode = ref('')
+// Pre-filled when arriving via a shareable link (/:code, e.g.
+// https://vuw-mrx.xyz/WXYZ12) instead of the plain /join form.
+const joinCode = ref((route.params.code as string | undefined)?.toUpperCase() ?? '')
 const loading = ref(false)
 const error = ref('')
 

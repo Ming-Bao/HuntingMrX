@@ -20,7 +20,7 @@ info:
     /topic/games/{gameId}/players/{playerId}
     ```
     Published after every in-progress state change. Role-filtered: Mr X's
-    `nodeId` is hidden from detectives except on reveal rounds (3, 8, 13, 18, 24).
+    `nodeId` is hidden from detectives except on reveal rounds (2, 8, 13, 18, 24).
 
     **Valid moves topic** — subscribe alongside the per-player topic:
     ```
@@ -32,7 +32,7 @@ info:
     **Kick detection** — a client should check on each push whether
     their own `playerId` is still present in `players`. If it is not
     and `phase` is still `LOBBY`, the client was kicked.
-  version: 0.1.9
+  version: 0.1.10
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -512,7 +512,7 @@ webhooks:
         - `mrXDoubleMovePending === true` → show "second leg" banner; await new valid-moves push
         - Update map markers and ticket counts from the new state
 
-        **Reveal rounds:** 3, 8, 13, 18, 24. On these rounds the final
+        **Reveal rounds:** 2, 8, 13, 18, 24. On these rounds the final
         `mrXLog` entry has a non-null `nodeId` and Mr X's position is
         shown in detective-view responses.
       requestBody:
@@ -699,7 +699,7 @@ components:
           nullable: true
           description: |
             Mr X's destination node. Non-null only on the final leg of a reveal
-            round (rounds 3, 8, 13, 18, 24). Null on all other entries.
+            round (rounds 2, 8, 13, 18, 24). Null on all other entries.
 
     GameStateDTO:
       type: object

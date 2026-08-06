@@ -20,7 +20,7 @@ public class GameService {
 
     private static final String JOIN_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final int JOIN_CODE_LENGTH = 6;
-    private static final Set<Integer> REVEAL_ROUNDS = Set.of(3, 8, 13, 18, 24);
+    private static final Set<Integer> REVEAL_ROUNDS = Set.of(2, 8, 13, 18, 24);
     private static final long TURN_TIMEOUT_MS = 15 * 60 * 1000L;
 
     private final SecureRandom random = new SecureRandom();

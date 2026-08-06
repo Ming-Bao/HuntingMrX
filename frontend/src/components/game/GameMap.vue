@@ -16,6 +16,27 @@
         @click="switchStyle(s.id)"
       >{{ s.label }}</button>
     </div>
+    <div class="search-box">
+      <input
+        v-model="searchQuery"
+        type="text"
+        inputmode="numeric"
+        placeholder="Search node…"
+        class="search-input"
+        @focus="showResults = true"
+        @blur="showResults = false"
+        @keydown.enter="searchResults.length && selectSearchResult(searchResults[0])"
+        @keydown.escape="($event.target as HTMLInputElement).blur()"
+      />
+      <div v-if="showResults && searchResults.length" class="search-results">
+        <button
+          v-for="n in searchResults"
+          :key="n.id"
+          class="search-result"
+          @mousedown.prevent="selectSearchResult(n)"
+        >Node {{ n.id }}</button>
+      </div>
+    </div>
     <div class="legend">
       <div v-for="m in modeLegend" :key="m.mode" class="legend-item">
         <div class="legend-line" :style="{ backgroundColor: m.color }"></div>
@@ -55,6 +76,41 @@ function flyToMyNode() {
   map.flyTo({ center: [myNode.value.lng, myNode.value.lat], zoom: Math.max(map.getZoom(), 15) })
 }
 
+// Camera-only move — deliberately does NOT touch exploreNode/selection.
+// Used by node search and "focus on this player": both are just "take me
+// there to look," not a click on the node itself, so nothing should get
+// selected or dim/highlight as a side effect.
+function flyToNode(node: GraphNode) {
+  if (!map) return
+  map.flyTo({ center: [node.lng, node.lat], zoom: Math.max(map.getZoom(), 15) })
+}
+
+// Lets the sidebar player list ("focus on this player's node") drive the
+// camera without the parent needing to know anything about maplibre.
+function focusNodeId(nodeId: number) {
+  const node = props.nodes.find(n => n.id === nodeId)
+  if (node) flyToNode(node)
+}
+defineExpose({ focusNodeId })
+
+// ── Node search ────────────────────────────────────────────────────────────────
+
+const searchQuery = ref('')
+const showResults = ref(false)
+const searchResults = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return []
+  return props.nodes
+    .filter(n => String(n.id).includes(q) || (n.label ?? '').toLowerCase().includes(q))
+    .slice(0, 8)
+})
+
+function selectSearchResult(node: GraphNode) {
+  flyToNode(node)
+  searchQuery.value = ''
+  showResults.value = false
+}
+
 // Auto-center on the player's own node the moment it's known, once — the map
 // starts on a wide Wellington-wide view because node/player data hasn't
 // loaded yet at construction time, so this catches the first moment it has.
@@ -74,7 +130,8 @@ watch(myNode, node => {
 
 // ── Always-on connected-node exploration highlight ─────────────────────────────
 // Independent of props.selectedNode (which is turn-gated by the parent) — this
-// lets clicking any node, on any turn, highlight its direct graph neighbors.
+// lets clicking any node, on any turn, dim unrelated nodes and highlight its
+// direct graph neighbors, purely as a "what connects here" browsing aid.
 
 const exploreNode = ref<GraphNode | null>(null)
 const neighborIds = computed<Set<number> | null>(() => {
@@ -88,7 +145,27 @@ const neighborIds = computed<Set<number> | null>(() => {
   return ids
 })
 
-watch(() => props.selectedNode, n => { if (n === null) exploreNode.value = null })
+watch(() => props.selectedNode, n => {
+  if (n === null) { exploreNode.value = null; return }
+  // A direct map click sets exploreNode itself, synchronously, before this
+  // watch ever runs — so if exploreNode doesn't already match the incoming
+  // selection, it came from elsewhere (e.g. the sidebar). Clear it so a
+  // leftover neighbor-explore highlight from an earlier map click doesn't
+  // linger alongside the new move highlight.
+  if (exploreNode.value?.id !== n.id) exploreNode.value = null
+})
+
+// ── Move-selection highlight ─────────────────────────────────────────────────
+// A separate, narrower spotlight for picking a destination (e.g. from the
+// sidebar's Reachable Nodes list): only your own node and the chosen
+// destination stay lit, not every neighbor of the destination — that's the
+// explore highlight's job above, not this one.
+const moveHighlightIds = computed<Set<number> | null>(() => {
+  if (!props.selectedNode) return null
+  const ids = new Set<number>([props.selectedNode.id])
+  if (myNode.value) ids.add(myNode.value.id)
+  return ids
+})
 
 // ── Map tile style catalogue ────────────────────────────────────────────────────
 
@@ -315,9 +392,11 @@ function nodeGeoJSON() {
       const iconKey = isPlayer   ? 'node-occupied'
                     : isSelected ? `node-${key}-selected`
                     : `node-${key}`
-      const dimmed = exploreNode.value != null &&
-        n.id !== exploreNode.value.id &&
-        !(neighborIds.value?.has(n.id))
+      const exploring = exploreNode.value != null &&
+        (n.id === exploreNode.value.id || neighborIds.value?.has(n.id))
+      const moveHighlighted = moveHighlightIds.value?.has(n.id) ?? false
+      const dimming = exploreNode.value != null || moveHighlightIds.value != null
+      const dimmed = dimming && !exploring && !moveHighlighted
       return {
         type: 'Feature' as const,
         properties: { id: n.id, label: n.label, isReachable, isPlayer, playerColor, playerName, playerRole, iconKey, dimmed },
@@ -598,6 +677,24 @@ watch(
 }
 .style-btn--active {
   @apply bg-white/10 text-white font-semibold;
+}
+
+.search-box {
+  @apply absolute top-3 left-1/2 -translate-x-1/2 z-10 w-40 sm:w-56;
+}
+.search-input {
+  @apply w-full text-sm px-3 py-1.5 rounded-lg
+         bg-gray-900/80 text-white placeholder-gray-500
+         border border-gray-700 shadow outline-none
+         focus:border-gray-500 transition-colors;
+}
+.search-results {
+  @apply mt-1 rounded-lg bg-gray-900/95 border border-gray-700 shadow
+         max-h-48 overflow-y-auto;
+}
+.search-result {
+  @apply block w-full text-left text-sm font-mono px-3 py-1.5 text-gray-200
+         hover:bg-gray-800 transition-colors;
 }
 
 .legend {

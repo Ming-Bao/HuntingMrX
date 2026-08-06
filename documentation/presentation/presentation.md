@@ -230,7 +230,7 @@ Example: `leaveGame_mrXLeaves_mrXRemovedFromPlayerList` — previous tests only 
 - Ticket decrement on move
 - Turn rotation (MrX → each detective → repeat)
 - Catch detection and win conditions
-- Reveal rounds (3, 8, 13, 18, 24)
+- Reveal rounds (2, 8, 13, 18, 24)
 - *Milestone:* Two players can complete a full round
 
 **Sprint 4 — Map + Wellington Graph (T2, Weeks 1–3)**

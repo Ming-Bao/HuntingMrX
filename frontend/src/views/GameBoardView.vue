@@ -19,12 +19,46 @@
       </div>
     </div>
 
+    <!-- Popup: blocking, dismissed by a click anywhere on it. Role, turn-start
+         and Mr X reveal popups share this overlay and queue behind one
+         another (queued rather than stacked, since more than one can land at
+         once — e.g. role at mount plus an immediate first turn, or a reveal
+         round handing the turn straight to a detective) instead of flashing
+         two overlays on top of each other. -->
+    <div v-if="activePopup" class="turn-overlay" @click="dismissPopup">
+      <div class="turn-overlay-content">
+        <template v-if="activePopup.kind === 'role'">
+          <p class="turn-overlay-title" :class="activePopup.role === 'MR_X' ? 'turn-overlay-title--reveal' : 'turn-overlay-title--detective'">
+            You Are {{ activePopup.role === 'MR_X' ? 'Mr X' : 'a Detective' }}
+          </p>
+          <p class="turn-overlay-hint">
+            {{ activePopup.role === 'MR_X' ? 'Evade the detectives for 24 rounds.' : 'Track down Mr X before round 24.' }}
+            Click anywhere to begin.
+          </p>
+        </template>
+        <template v-else-if="activePopup.kind === 'turn'">
+          <p class="turn-overlay-title">Your Turn</p>
+          <p class="turn-overlay-hint">Click anywhere to continue</p>
+        </template>
+        <template v-else>
+          <p class="turn-overlay-title turn-overlay-title--reveal">
+            {{ store.myRole === 'MR_X' ? 'You’ve Been Revealed' : 'Mr X Revealed' }}
+          </p>
+          <p class="turn-overlay-hint">
+            {{ store.myRole === 'MR_X' ? 'Detectives can now see' : 'Spotted at' }}
+            Node {{ activePopup.nodeId }} — click anywhere to continue
+          </p>
+        </template>
+      </div>
+    </div>
+
     <!-- Map load error -->
     <div v-if="mapError" class="map-error">{{ mapError }}</div>
 
     <!-- Body -->
     <div class="body">
       <GameMap
+        ref="gameMapRef"
         :nodes="nodes"
         :edges="edges"
         :display-players="displayPlayers"
@@ -39,7 +73,6 @@
         :mr-x-log="gameState?.mrXLog ?? []"
         :selected-node="selectedNode"
         :selected-ticket="selectedTicket"
-        :available-modes="ticketOptionsForSelected"
         :reachable="isSelectedReachable"
         :is-my-turn="store.isMyTurn"
         :submitting="submitting"
@@ -52,6 +85,7 @@
         @select-ticket="selectedTicket = $event"
         @confirm-move="confirmMove"
         @select-node="handleSelectNode"
+        @focus-node="gameMapRef?.focusNodeId($event)"
         @declare-double="doubleMode = true"
         @cancel-double="doubleMode = false"
         @leave="handleLeave"
@@ -68,7 +102,7 @@ import SockJS from 'sockjs-client'
 import { ArrowLeft } from 'lucide-vue-next'
 import { useGameStore } from '../stores/gameStore'
 import { leaveGame, getMap, getGame, getValidMoves, submitMove } from '../api/gameApi'
-import type { GraphNode, GraphEdge, DemoPlayer, DemoTicket, ValidMoveDTO } from '../types/game'
+import type { GraphNode, GraphEdge, DemoPlayer, DemoTicket, Role } from '../types/game'
 import { MODE_COLORS, modeLabel } from '../utils/transportModes'
 import GameMap from '../components/game/GameMap.vue'
 import InfoPanel from '../components/game/InfoPanel.vue'
@@ -84,6 +118,10 @@ const gameId = computed(() => route.params.id as string)
 const nodes    = ref<GraphNode[]>([])
 const edges    = ref<GraphEdge[]>([])
 const mapError = ref<string | null>(null)
+// Lets the sidebar player list ask the map to fly to a given node (e.g. a
+// revealed Mr X position, or a detective's spot) without GameBoardView
+// having to know anything about maplibre itself.
+const gameMapRef = ref<InstanceType<typeof GameMap> | null>(null)
 
 // ── Move state ────────────────────────────────────────────────────────────────
 
@@ -108,12 +146,6 @@ const reachableNodeIds = computed<Set<number>>(() => {
 const isSelectedReachable = computed(() =>
   !!selectedNode.value && reachableNodeIds.value.has(selectedNode.value.id)
 )
-
-const ticketOptionsForSelected = computed<string[]>(() => {
-  if (!selectedNode.value) return []
-  const move = store.validMoves.find(m => m.nodeId === selectedNode.value!.id)
-  return move?.ticketOptions ?? []
-})
 
 // Player colors for detectives (up to 5)
 const DETECTIVE_COLORS = ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#db2777']
@@ -252,6 +284,64 @@ watch(() => store.isMyTurn, (nowMyTurn) => {
   if (!nowMyTurn) doubleMode.value = false
 })
 
+// Blocking popups — role announcement, "Your Turn", and Mr X reveal all
+// share one overlay via a small queue (see template) so they never fight for
+// the screen when more than one lands at once.
+type PopupEvent =
+  | { kind: 'role'; role: Role }
+  | { kind: 'turn' }
+  | { kind: 'reveal'; nodeId: number }
+const popupQueue = ref<PopupEvent[]>([])
+const activePopup = computed(() => popupQueue.value[0] ?? null)
+function dismissPopup() { popupQueue.value.shift() }
+
+// Role popup — announced once, right when we land on the game board and
+// know our role. Works whether we arrived straight from the lobby (role
+// already known synchronously) or via a direct link/refresh (role only
+// becomes known once onMounted's fetch resolves below).
+if (store.myRole) {
+  popupQueue.value.push({ kind: 'role', role: store.myRole })
+} else {
+  const stopRoleWatch = watch(() => store.myRole, role => {
+    if (role) {
+      popupQueue.value.push({ kind: 'role', role })
+      stopRoleWatch()
+    }
+  })
+}
+
+// mrXLog is never role-filtered by the server (only live PlayerDTO.nodeId
+// is) — reveal-round entries carry a nodeId for everyone, Mr X included —
+// so both roles can detect a reveal off the exact same field.
+let seenMrXLogLength: number | null = null
+let wasMyTurn = false
+
+watch(
+  () => gameState.value,
+  (state) => {
+    if (!state) return
+
+    const log = state.mrXLog ?? []
+    if (seenMrXLogLength === null) {
+      // First observation of the log (mount, or a reconnect mid-game) — this
+      // is a baseline, not a new event, however many reveals it may already
+      // contain.
+      seenMrXLogLength = log.length
+    } else if (log.length > seenMrXLogLength) {
+      const revealed = log.slice(seenMrXLogLength).find(e => e.nodeId != null)
+      if (revealed) popupQueue.value.push({ kind: 'reveal', nodeId: revealed.nodeId! })
+      seenMrXLogLength = log.length
+    }
+
+    // Turn popup: every false→true transition. Doesn't refire mid-double-move
+    // (isMyTurn stays true across both legs, so there's no second edge).
+    const nowMyTurn = store.isMyTurn
+    if (nowMyTurn && !wasMyTurn) popupQueue.value.push({ kind: 'turn' })
+    wasMyTurn = nowMyTurn
+  },
+  { deep: true, immediate: true },
+)
+
 // Also fetch valid moves when the store says it becomes our turn
 // (handles cases where the WebSocket push arrived before we subscribed)
 watch(
@@ -355,5 +445,38 @@ async function handleLeave() {
 .body { @apply flex flex-1 overflow-hidden flex-col md:flex-row; }
 .map-error {
   @apply bg-red-900/20 border-b border-red-700 text-red-400 text-sm px-4 py-2;
+}
+
+.turn-overlay {
+  @apply fixed inset-0 z-50 flex items-center justify-center
+         bg-black/55 cursor-pointer;
+  animation: turn-overlay-fade 0.2s ease-out;
+}
+.turn-overlay-content {
+  @apply text-center select-none;
+  animation: turn-overlay-pop 0.25s ease-out;
+}
+.turn-overlay-title {
+  @apply text-5xl font-extrabold text-green-400 tracking-wide;
+}
+.turn-overlay-title--reveal {
+  @apply text-red-400;
+}
+.turn-overlay-title--detective {
+  @apply text-blue-400;
+}
+.turn-overlay-hint {
+  @apply mt-3 text-gray-300 text-sm;
+}
+@keyframes turn-overlay-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes turn-overlay-pop {
+  from { transform: scale(0.9); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-overlay, .turn-overlay-content { animation: none; }
 }
 </style>

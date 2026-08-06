@@ -43,7 +43,7 @@ Documented in `documentation/plans/states-diagrams.md`:
 - **Game phases**: `Idle → Lobby → InProgress → (Paused | DetectivesWin | MrXWins | GameAborted)`
 - **InProgress sub-phases**: `MrXTurn → DetectiveTurn → RoundEnd → MrXTurn` (cycles 24 rounds)
 - **Disconnection handling**: `InProgress → Paused` on any disconnect; reconnect within grace period resumes, otherwise `GameAborted`
-- **Mr X turn flow**: reveal check (rounds 3, 8, 13, 18, 24) → fetch valid moves → select node + ticket → optional double-ticket second move → server validates → broadcast
+- **Mr X turn flow**: reveal check (rounds 2, 8, 13, 18, 24) → fetch valid moves → select node + ticket → optional double-ticket second move → server validates → broadcast
 - **Detective turn flow**: fetch valid moves → select node + ticket → submit → server catch-check → advance to next detective or increment round
 
 ## Key Design Decisions
