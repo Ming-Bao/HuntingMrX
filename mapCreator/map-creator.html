@@ -17,6 +17,7 @@
     <button id="btn-save-map" disabled>Save Map</button>
     <button id="btn-undo"     disabled>Undo</button>
     <button id="btn-auto-gen" disabled>Auto-Generate</button>
+    <button id="btn-show-components" title="Colour every connected component differently">Show Components</button>
   </div>
 
   <div class="tb-sep"></div>
@@ -44,6 +45,19 @@
     <span class="tb-count">Edges: <b id="edge-count">0</b></span>
   </div>
 
+  <div class="tb-sep"></div>
+
+  <div class="tb-group">
+    <input type="text" id="search-node" class="tb-input" placeholder="Go to node id / name…">
+    <button id="btn-search-node">Go</button>
+  </div>
+
+  <div class="tb-sep"></div>
+
+  <div class="tb-group">
+    <button id="btn-renumber" title="Relabel every node 1..N, top-left to bottom-right">Renumber Nodes</button>
+  </div>
+
   <span id="status">Load road GeoJSON to begin</span>
 </div>
 
@@ -67,7 +81,8 @@
 
   <div id="hud">
     <b>Click road</b> — add node<br>
-    <b>Click node</b> — rename<br>
+    <b>Click node</b> — show neighbours<br>
+    <b>Double-click node</b> — rename<br>
     <b>Drag node → node</b> — add edge<br>
     <b>Right-click node</b> — delete<br>
     <b>Right-click edge</b> — edit modes

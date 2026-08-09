@@ -61,6 +61,18 @@ button.active  { background: #1d4ed8; border-color: #3b82f6; }
 .tb-count { font-size: 12px; color: #9ca3af; }
 .tb-count b { color: #e5e7eb; }
 
+.tb-input {
+  padding: 5px 9px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #2a2a2a;
+  color: #fff;
+  font-size: 12px;
+  width: 150px;
+}
+.tb-input:focus { outline: none; border-color: #3b82f6; }
+.tb-input::placeholder { color: #6b7280; }
+
 #status {
   margin-left: auto;
   font-size: 11px;

@@ -78,6 +78,8 @@ let nextEdgeId = 1;
 
 let activeModes    = new Set(['ESCOOTER', 'BUS']); // modes applied to new edges
 let selectedEdgeId = null;
+let exploreNodeId  = null; // clicked node whose direct neighbours stay lit (others dim)
+let componentsMode  = false; // "Show Components" toggle — see toggleComponents()
 
 const undoStack = [];
 const UNDO_MAX  = 20;
@@ -438,6 +440,51 @@ function removeNode(id) {
   updateCounts();
 }
 
+// Finds a node by exact id (numeric input) or, failing that, by exact label
+// (case-insensitive) — flies the camera there and reuses the click-to-explore
+// highlight so its neighbours are shown too. Reports failure via the status
+// bar rather than throwing, since "doesn't exist" is an expected outcome here.
+function searchNode(query) {
+  const q = query.trim();
+  if (!q) { setStatus('Enter a node id or name to search'); return; }
+
+  let target = /^\d+$/.test(q) ? nodes.find(n => n.id === Number(q)) : null;
+  if (!target) target = nodes.find(n => n.label.toLowerCase() === q.toLowerCase());
+
+  if (!target) {
+    setStatus(`Node "${q}" doesn't exist`);
+    return;
+  }
+
+  exploreNodeId = target.id;
+  refreshSources();
+  map.flyTo({ center: [target.lng, target.lat], zoom: Math.max(map.getZoom(), 16) });
+  const named = target.label !== String(target.id) ? ` (${target.label})` : '';
+  setStatus(`Found node ${target.id}${named} — showing its neighbours`);
+}
+
+// Relabels every node 1..N in reading order: top-left to bottom-right.
+// Buckets nodes into ~440 m north-south bands ("rows") and sorts west-to-east
+// within each band — a plain two-key sort on raw lat/lng would order strictly
+// by latitude with no row grouping, which for a real (non-gridded) road
+// network doesn't read as rows at all. Only touches `label`, never `id` —
+// ids are what edges reference, so this can't break connectivity.
+function renumberNodesReadingOrder() {
+  if (!nodes.length) { setStatus('No nodes to renumber'); return; }
+  if (!confirm(`Relabel all ${nodes.length} nodes 1–${nodes.length}, top-left to bottom-right? This overwrites existing labels.`)) return;
+
+  saveUndo();
+  const ROW_HEIGHT_DEG = 0.004; // ≈ 440 m north-south band
+  const maxLat = Math.max(...nodes.map(n => n.lat));
+  const rowOf = n => Math.floor((maxLat - n.lat) / ROW_HEIGHT_DEG);
+
+  const ordered = [...nodes].sort((a, b) => rowOf(a) - rowOf(b) || a.lng - b.lng);
+  ordered.forEach((n, i) => { n.label = String(i + 1); });
+
+  refreshSources();
+  setStatus(`Renumbered ${nodes.length} node labels, top-left → bottom-right`);
+}
+
 function addEdge(fromId, toId) {
   const from = nodes.find(n => n.id === fromId);
   const to   = nodes.find(n => n.id === toId);
@@ -456,9 +503,31 @@ function addEdge(fromId, toId) {
 
   let coordinates;
 
-  // Straight line only when exactly one end is a train node (train↔road mix).
-  // Train↔train uses road geometry; road↔road always uses road geometry.
-  const mixedTrainRoad = (from.offRoad && !to.offRoad) || (!from.offRoad && to.offRoad);
+  // "Train" here means the node already carries a TRAIN edge (nodesGJ's
+  // hasTrain), not the offRoad flag — offRoad is only ever set by the
+  // auto-generator, so a manually-placed or merged station (offRoad false)
+  // wouldn't otherwise count even though it's a real station.
+  const nodeHasTrain = id => edges.some(e => (e.from === id || e.to === id) && e.modes.includes('TRAIN'));
+  const fromTrain = nodeHasTrain(fromId);
+  const toTrain   = nodeHasTrain(toId);
+  const drawingTrain = activeModes.has('TRAIN');
+
+  let mixedTrainRoad;
+  if (fromTrain === toTrain) {
+    // Both train, or both non-train — not a train/road mismatch by itself.
+    // Train↔train always routes normally (below); for non-train↔non-train,
+    // fall back to the legacy offRoad check (road↔road always routes
+    // normally too, so this only ever matters for the rare case where one
+    // side is offRoad without carrying a TRAIN edge yet).
+    mixedTrainRoad = !fromTrain && ((from.offRoad && !to.offRoad) || (!from.offRoad && to.offRoad));
+  } else {
+    // Exactly one end already has TRAIN. If we're actively drawing a TRAIN
+    // edge, this is a real train connection (a new station, or hooking into
+    // an existing bus/escooter node as an interchange) and should route
+    // normally, same as train↔train. Otherwise it's a genuine train/road
+    // mismatch — no rail-adjacent geometry to follow, so use a straight line.
+    mixedTrainRoad = !drawingTrain;
+  }
   if (!roadData || !graphAdj.size || mixedTrainRoad) {
     coordinates = [[from.lng, from.lat], [to.lng, to.lat]];
   } else {
@@ -497,6 +566,16 @@ function removeEdge(id) {
 //  GEOJSON BUILDERS
 // ══════════════════════════════════════════════════════════
 
+// IDs of nodes directly connected to `id` by an edge.
+function neighbourIdSet(id) {
+  const s = new Set();
+  for (const e of edges) {
+    if (e.from === id) s.add(e.to);
+    if (e.to === id)   s.add(e.from);
+  }
+  return s;
+}
+
 function nodesGJ() {
   const nodeModes = new Map();
   for (const e of edges) {
@@ -507,6 +586,13 @@ function nodesGJ() {
       nodeModes.get(e.to).add(m);
     }
   }
+
+  // Auto-heals if the explored node was since deleted (undo, right-click
+  // delete, reload) — falls back to "nothing dimmed" instead of a stale ID
+  // matching no node and dimming everything.
+  const exploring = exploreNodeId != null && nodes.some(n => n.id === exploreNodeId);
+  const nbrs = exploring ? neighbourIdSet(exploreNodeId) : null;
+
   return {
     type: 'FeatureCollection',
     features: nodes.map(n => {
@@ -520,6 +606,7 @@ function nodesGJ() {
           hasBus:      ms.has('BUS'),
           hasTrain:    ms.has('TRAIN'),
           hasFerry:    ms.has('FERRY'),
+          dimmed: exploring && n.id !== exploreNodeId && !nbrs.has(n.id),
         },
         geometry: { type: 'Point', coordinates: [n.lng, n.lat] },
       };
@@ -530,6 +617,8 @@ function nodesGJ() {
 function edgesGJ() {
   const SPACING = 4.5;
   const features = [];
+
+  const exploring = exploreNodeId != null && nodes.some(n => n.id === exploreNodeId);
 
   // Collect every (edge, mode) pair grouped by node-pair so that
   // separate edge objects between the same two nodes are offset together.
@@ -548,9 +637,12 @@ function edgesGJ() {
     items.sort((a, b) => modeRank(a.mode) - modeRank(b.mode));
     const n = items.length;
     items.forEach(({ e, mode }, i) => {
+      // Only edges touching the explored node itself stay lit — showing "what
+      // connects here", not the wider neighbourhood.
+      const dimmed = exploring && e.from !== exploreNodeId && e.to !== exploreNodeId;
       features.push({
         type: 'Feature',
-        properties: { id: e.id, mode, lineOffset: n === 1 ? 0 : (i - (n - 1) / 2) * SPACING },
+        properties: { id: e.id, mode, lineOffset: n === 1 ? 0 : (i - (n - 1) / 2) * SPACING, dimmed },
         geometry: { type: 'LineString', coordinates: e.coordinates },
       });
     });
@@ -571,6 +663,13 @@ function previewGJ(coords) {
 // ══════════════════════════════════════════════════════════
 //  MAP INITIALISATION
 // ══════════════════════════════════════════════════════════
+
+// Shared dim expressions — clicking a node ("explore") fades everything
+// except it and its direct neighbours, so the local connectivity is obvious
+// even in the densest parts of the graph.
+const DIMMED_NODE_OPACITY        = ['case', ['boolean', ['get', 'dimmed'], false], 0.18, 1];
+const DIMMED_EDGE_OPACITY        = ['case', ['boolean', ['get', 'dimmed'], false], 0.1,  1];
+const DIMMED_EDGE_CASING_OPACITY = ['case', ['boolean', ['get', 'dimmed'], false], 0.08, 0.8];
 
 function initMap() {
   map = new maplibregl.Map({
@@ -618,7 +717,7 @@ function initMap() {
         'line-color': MODE_COLORS.TRAIN,
         'line-width': 10,
         'line-offset': ['get', 'lineOffset'],
-        'line-opacity': 0.8,
+        'line-opacity': DIMMED_EDGE_CASING_OPACITY,
       },
     });
 
@@ -634,7 +733,7 @@ function initMap() {
         ],
         'line-width': 4,
         'line-offset': ['get', 'lineOffset'],
-        'line-opacity': 1,
+        'line-opacity': DIMMED_EDGE_OPACITY,
       },
     });
 
@@ -651,6 +750,7 @@ function initMap() {
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },
+      paint: { 'icon-opacity': DIMMED_NODE_OPACITY },
     });
 
     map.addLayer({
@@ -663,7 +763,7 @@ function initMap() {
         'text-allow-overlap': true,
         'text-ignore-placement': true,
       },
-      paint: { 'text-color': '#ffffff' },
+      paint: { 'text-color': '#ffffff', 'text-opacity': DIMMED_NODE_OPACITY },
     });
 
     map.addLayer({
@@ -680,6 +780,28 @@ function initMap() {
         'text-color': '#d1d5db',
         'text-halo-color': '#000000',
         'text-halo-width': 1.5,
+        'text-opacity': DIMMED_NODE_OPACITY,
+      },
+    });
+
+    // "Show Components" overlay — hidden until toggled (see toggleComponents).
+    map.addSource('components-edges', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addSource('components-nodes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+    map.addLayer({
+      id: 'components-edges', type: 'line', source: 'components-edges',
+      layout: { visibility: 'none' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 0.9 },
+    });
+
+    map.addLayer({
+      id: 'components-nodes', type: 'circle', source: 'components-nodes',
+      layout: { visibility: 'none' },
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 7, 18, 14],
+        'circle-color': ['get', 'color'],
+        'circle-stroke-color': '#000000',
+        'circle-stroke-width': 1.5,
       },
     });
 
@@ -701,6 +823,93 @@ function refreshSources() {
 
 function setPreview(coords) {
   map?.getSource('preview')?.setData(previewGJ(coords));
+}
+
+// ══════════════════════════════════════════════════════════
+//  CONNECTED COMPONENTS ("Show Components" button)
+// ══════════════════════════════════════════════════════════
+// The finished map is supposed to be one single connected graph (see the
+// auto-generator's own bridge-disconnected-components pass) — this is a
+// manual way to check that after hand-edits too: colours every connected
+// component differently so any stray island jumps out at a glance.
+
+const COMPONENT_PALETTE = [
+  '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7',
+  '#ec4899', '#06b6d4', '#f97316', '#84cc16', '#6366f1',
+];
+
+function computeComponents() {
+  const adj = new Map();
+  for (const n of nodes) adj.set(n.id, []);
+  for (const e of edges) {
+    adj.get(e.from)?.push(e.to);
+    adj.get(e.to)?.push(e.from);
+  }
+
+  const compOf = new Map(); // nodeId -> component index
+  const sizes  = [];
+  for (const n of nodes) {
+    if (compOf.has(n.id)) continue;
+    const idx = sizes.length;
+    let size = 0;
+    const stack = [n.id];
+    compOf.set(n.id, idx);
+    while (stack.length) {
+      const cur = stack.pop();
+      size++;
+      for (const nb of adj.get(cur) ?? []) {
+        if (!compOf.has(nb)) { compOf.set(nb, idx); stack.push(nb); }
+      }
+    }
+    sizes.push(size);
+  }
+
+  return { compOf, sizes };
+}
+
+function toggleComponents() {
+  componentsMode = !componentsMode;
+  const btn = document.getElementById('btn-show-components');
+  const graphLayers = ['edges-train-casing', 'edges', 'nodes', 'node-labels', 'node-name-labels'];
+  const compLayers  = ['components-edges', 'components-nodes'];
+
+  if (componentsMode) {
+    const { compOf, sizes } = computeComponents();
+    const color = idx => COMPONENT_PALETTE[idx % COMPONENT_PALETTE.length];
+
+    map.getSource('components-nodes')?.setData({
+      type: 'FeatureCollection',
+      features: nodes.map(n => ({
+        type: 'Feature',
+        properties: { id: n.id, comp: compOf.get(n.id) ?? -1, color: color(compOf.get(n.id) ?? 0) },
+        geometry: { type: 'Point', coordinates: [n.lng, n.lat] },
+      })),
+    });
+    map.getSource('components-edges')?.setData({
+      type: 'FeatureCollection',
+      features: edges.map(e => ({
+        type: 'Feature',
+        properties: { comp: compOf.get(e.from) ?? -1, color: color(compOf.get(e.from) ?? 0) },
+        geometry: { type: 'LineString', coordinates: e.coordinates },
+      })),
+    });
+
+    for (const id of graphLayers) map.setLayoutProperty(id, 'visibility', 'none');
+    for (const id of compLayers)  map.setLayoutProperty(id, 'visibility', 'visible');
+    btn.classList.add('active');
+    btn.textContent = 'Hide Components';
+
+    const sorted = [...sizes].sort((a, b) => b - a);
+    setStatus(sizes.length === 1
+      ? `1 connected component — fully connected (${sorted[0]} nodes)`
+      : `${sizes.length} connected components — sizes: ${sorted.join(', ')}`);
+  } else {
+    for (const id of graphLayers) map.setLayoutProperty(id, 'visibility', 'visible');
+    for (const id of compLayers)  map.setLayoutProperty(id, 'visibility', 'none');
+    btn.classList.remove('active');
+    btn.textContent = 'Show Components';
+    setStatus('Ready');
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -766,17 +975,32 @@ function setupInteractions() {
     const nodeHit = map.queryRenderedFeatures(e.point, { layers: ['nodes'] });
     if (nodeHit.length > 0) {
       selectEdge(null);
-      renameNode(nodeHit[0].properties.id);
+      const id = nodeHit[0].properties.id;
+      // Click again on the same node to clear the highlight.
+      exploreNodeId = exploreNodeId === id ? null : id;
+      refreshSources();
       return;
     }
 
     selectEdge(null);
+    if (exploreNodeId !== null) { exploreNodeId = null; refreshSources(); }
 
     const snap = snapToRoad(e.lngLat.lng, e.lngLat.lat);
     if (!snap) { setStatus('No road found nearby — zoom in and click closer to a road'); return; }
 
     addNode(snap);
     setStatus(`Node ${nextNodeId - 1} added`);
+  });
+
+  // Renaming moved off single-click (now "show neighbours") to double-click.
+  // preventDefault() stops MapLibre's built-in double-click-to-zoom so a
+  // rename doesn't also yank the camera in.
+  map.on('dblclick', e => {
+    const nodeHit = map.queryRenderedFeatures(e.point, { layers: ['nodes'] });
+    if (nodeHit.length === 0) return;
+    e.preventDefault();
+    selectEdge(null);
+    renameNode(nodeHit[0].properties.id);
   });
 
   map.on('contextmenu', e => {
@@ -2224,6 +2448,15 @@ document.getElementById('btn-load-map').addEventListener('click', () => document
 document.getElementById('btn-save-map').addEventListener('click', saveMap);
 document.getElementById('btn-undo').addEventListener('click', undo);
 document.getElementById('btn-auto-gen').addEventListener('click', autoGenerate);
+document.getElementById('btn-show-components').addEventListener('click', toggleComponents);
+document.getElementById('btn-renumber').addEventListener('click', renumberNodesReadingOrder);
+
+document.getElementById('btn-search-node').addEventListener('click', () => {
+  searchNode(document.getElementById('search-node').value);
+});
+document.getElementById('search-node').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); searchNode(e.target.value); }
+});
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
 });
