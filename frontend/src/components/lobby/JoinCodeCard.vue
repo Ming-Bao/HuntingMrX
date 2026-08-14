@@ -33,13 +33,17 @@
 import { computed, ref, watch } from 'vue'
 import { ClipboardCopy, Check } from 'lucide-vue-next'
 import QRCode from 'qrcode'
+import { BASE_URL } from '../../utils/basePath'
 
 const props = defineProps<{ code: string }>()
 const copied = ref(false)
 const linkCopied = ref(false)
 const qrDataUrl = ref('')
 
-const joinLink = computed(() => props.code ? `${window.location.origin}/${props.code}` : '')
+// BASE_URL already carries a trailing slash ('/' or '/mrx/'), so this comes
+// out as e.g. https://host/WXYZ12 or https://host/mrx/WXYZ12 — matching
+// whichever prefix the /:code route above is actually mounted under.
+const joinLink = computed(() => props.code ? `${window.location.origin}${BASE_URL}${props.code}` : '')
 
 watch(joinLink, async (link) => {
   if (!link) { qrDataUrl.value = ''; return }

@@ -102,6 +102,7 @@ import SockJS from 'sockjs-client'
 import { ArrowLeft } from 'lucide-vue-next'
 import { useGameStore } from '../stores/gameStore'
 import { leaveGame, getMap, getGame, getValidMoves, submitMove } from '../api/gameApi'
+import { WS_PATH } from '../utils/basePath'
 import type { GraphNode, GraphEdge, DemoPlayer, DemoTicket, Role } from '../types/game'
 import { MODE_COLORS, modeLabel } from '../utils/transportModes'
 import GameMap from '../components/game/GameMap.vue'
@@ -216,7 +217,7 @@ function connectWs() {
   if (!store.playerId || gameId.value === 'preview') return
 
   stompClient = new Client({
-    webSocketFactory: () => new SockJS('/ws'),
+    webSocketFactory: () => new SockJS(WS_PATH),
     onConnect: () => {
       // Per-player state topic
       stompClient!.subscribe(

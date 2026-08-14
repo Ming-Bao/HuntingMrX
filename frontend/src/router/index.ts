@@ -14,7 +14,12 @@ const GameBoardView = () => import('../views/GameBoardView.vue')
 const GameEndView   = () => import('../views/GameEndView.vue')
 
 const router = createRouter({
-  history: createWebHistory(),
+  // import.meta.env.BASE_URL comes from vite.config.ts's `base` option
+  // (driven by the BASE_PATH env var) — '/' by default, or e.g. '/mrx/'
+  // when deployed under a path prefix. Passing it here keeps every
+  // router.push()/<router-link> using root-relative paths ('/create' etc.)
+  // working unchanged; vue-router resolves them against this base itself.
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/',             component: LandingView },
     { path: '/create',       component: CreateGameView },

@@ -16,6 +16,14 @@ CONTAINER_NAME="mrx"
 GIT_REF="${1:-main}"
 PORT="${PORT:-8080}"
 
+# Set to deploy under a URL path prefix instead of the domain root — e.g.
+# BASE_PATH=/mrx ./update-container.sh for a server that only hands out
+# https://host/mrx/. Baked into the image at build time (see Dockerfile's
+# ARG BASE_PATH), not runtime-overridable, so changing it means rebuilding —
+# which this script always does anyway. Empty (the default) reproduces
+# today's root-path behavior exactly.
+BASE_PATH="${BASE_PATH:-}"
+
 cd "$REPO_DIR"
 
 echo "==> Fetching latest refs..."
@@ -37,6 +45,7 @@ echo "    ${GIT_REF} -> ${RESOLVED_SHA}"
 echo "==> Building image..."
 docker build \
   --build-arg GIT_REF="${RESOLVED_SHA}" \
+  --build-arg BASE_PATH="${BASE_PATH}" \
   -t "${IMAGE_NAME}:${RESOLVED_SHA}" \
   -t "${IMAGE_NAME}:latest" \
   "${REPO_DIR}"
@@ -58,5 +67,5 @@ docker run -d \
   -p "127.0.0.1:${PORT}:80" \
   "${IMAGE_NAME}:latest"
 
-echo "==> Done. Running ${IMAGE_NAME}:${RESOLVED_SHA} on port ${PORT}"
+echo "==> Done. Running ${IMAGE_NAME}:${RESOLVED_SHA} on port ${PORT}${BASE_PATH:+ (base path: ${BASE_PATH})}"
 docker ps --filter "name=${CONTAINER_NAME}"

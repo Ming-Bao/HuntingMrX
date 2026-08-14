@@ -8,6 +8,13 @@
 #
 #   docker build --build-arg GIT_REF=v0.1.0 -t hunting-mrx-wellington:v0.1.0 .
 #
+# NOTE on path prefixes: pass --build-arg BASE_PATH=/mrx to deploy this
+# under https://host/mrx/ instead of the domain root (e.g. a university
+# server that only hands out a path, not a subdomain). See the ARG BASE_PATH
+# comments in stages 3/4 — it's baked into the image, not runtime-overridable
+# via `docker run -e`, so rebuild to change it. Unset reproduces today's
+# root-path behavior exactly.
+#
 # NOTE on caching: Docker caches the `git clone` layer by its command text
 # (the ARG values), not by what's actually on the remote — rebuilding with
 # the same GIT_REF reuses the old clone even if that branch has new commits.
@@ -43,6 +50,14 @@ RUN mvn -B -q package -DskipTests
 
 # ---- Stage 3: build the frontend (Vue 3 / Vite) ----------------------------
 FROM node:22-alpine AS frontend-build
+# Set to serve this deploy under a URL path prefix instead of the domain
+# root — e.g. --build-arg BASE_PATH=/mrx for a university server that only
+# gives out https://host/mrx/. Threaded through to the Vite build (bakes
+# asset paths + router base), the backend's context-path (below), and the
+# generated nginx config. Empty (the default) reproduces today's root-path
+# behavior exactly — must start with "/" and have no trailing slash when set.
+ARG BASE_PATH=""
+ENV BASE_PATH=${BASE_PATH}
 WORKDIR /build
 COPY --from=clone /src/frontend/package.json /src/frontend/package-lock.json ./
 RUN npm ci
@@ -51,13 +66,20 @@ RUN npm run build
 
 # ---- Stage 4: runtime — backend + frontend, one image, two processes ------
 FROM eclipse-temurin:21-jre-jammy AS runtime
+# ARGs don't cross stages — redeclare so both the nginx-config generation
+# below and the backend's context-path (application.properties, read from
+# the container environment at boot via supervisord) see the same value.
+ARG BASE_PATH=""
+ENV BASE_PATH=${BASE_PATH}
 RUN apt-get update \
     && apt-get install -y --no-install-recommends nginx supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=backend-build /build/target/*.jar /app/backend.jar
 COPY --from=frontend-build /build/dist /usr/share/nginx/html
-COPY --from=clone /src/docker/nginx.conf /etc/nginx/sites-enabled/default
+COPY --from=clone /src/docker/render-nginx-conf.sh /tmp/render-nginx-conf.sh
+RUN sh /tmp/render-nginx-conf.sh "$BASE_PATH" > /etc/nginx/sites-enabled/default \
+    && rm /tmp/render-nginx-conf.sh
 COPY --from=clone /src/docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # 8999: backend (Spring Boot REST + STOMP/WebSocket) — matches

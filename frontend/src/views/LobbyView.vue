@@ -56,6 +56,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Client } from '@stomp/stompjs'
 import SockJS from 'sockjs-client'
 import { startGame, leaveGame, kickPlayer } from '../api/gameApi'
+import { WS_PATH } from '../utils/basePath'
 import { useGameStore } from '../stores/gameStore'
 import type { GameStateDTO } from '../types/game'
 import PageHeader from '../components/ui/PageHeader.vue'
@@ -83,7 +84,7 @@ let stompClient: Client | null = null
 onMounted(() => {
   if (gameId.value === 'preview') return
   stompClient = new Client({
-    webSocketFactory: () => new SockJS('/ws'),
+    webSocketFactory: () => new SockJS(WS_PATH),
     onConnect: () => {
       stompClient!.subscribe(`/topic/games/${gameId.value}`, (msg) => {
         const state: GameStateDTO = JSON.parse(msg.body)
