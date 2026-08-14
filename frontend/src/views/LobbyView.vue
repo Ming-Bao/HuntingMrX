@@ -80,6 +80,7 @@ const aborted = ref(false)
 const abortMessage = ref('')
 
 let stompClient: Client | null = null
+let pollHandle: number | null = null
 
 // Shared by the live subscription and the reconnect catch-up fetch below —
 // same "what does this state mean for me" branching either way.
@@ -135,10 +136,25 @@ onMounted(() => {
     // phase: 'ENDED' state from the server, handled in applyState.
   })
   stompClient.activate()
+
+  // Belt-and-suspenders poll, independent of the WebSocket's own notion of
+  // connection state — the reconnect-triggered catch-up above only fires on
+  // an actual disconnect→reconnect cycle. A connection can also silently
+  // drop just the one "game started" broadcast without ever crossing
+  // whatever threshold counts as "disconnected," in which case nothing
+  // currently prompts a re-sync. This bounds that staleness to one poll
+  // interval regardless of what the WebSocket layer thinks is happening.
+  pollHandle = window.setInterval(async () => {
+    if (!store.playerId || gameId.value === 'preview') return
+    try {
+      applyState(await getGame(gameId.value, store.playerId))
+    } catch { /* best-effort, try again next tick */ }
+  }, 6000)
 })
 
 onUnmounted(() => {
   stompClient?.deactivate()
+  if (pollHandle !== null) window.clearInterval(pollHandle)
 })
 
 async function handleStart() {

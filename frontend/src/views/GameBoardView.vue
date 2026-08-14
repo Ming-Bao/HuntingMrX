@@ -201,6 +201,7 @@ const turnBadgeClass = computed(() => ({
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
 let stompClient: Client | null = null
+let pollHandle: number | null = null
 
 // Shared by every place that gets a fresh GameStateDTO from somewhere other
 // than the live valid-moves push: initial mount, every WebSocket (re)connect
@@ -284,10 +285,23 @@ onMounted(async () => {
 
   await syncFromServer()
   connectWs()
+
+  // Belt-and-suspenders poll, independent of whatever the WebSocket thinks
+  // its connection state is: the reconnect-triggered catch-up in connectWs
+  // only fires on an actual disconnect→reconnect cycle, but a connection
+  // can also silently drop an individual broadcast (a buffering hiccup, a
+  // brief stall) without ever crossing whatever threshold counts as
+  // "disconnected" — nothing prompts a re-sync in that case, so another
+  // player's move could go unnoticed here until some *future* broadcast
+  // happens to get through cleanly. This just re-checks on a timer
+  // regardless, so staleness is bounded to one poll interval no matter what
+  // the WebSocket layer is doing.
+  pollHandle = window.setInterval(syncFromServer, 6000)
 })
 
 onUnmounted(() => {
   stompClient?.deactivate()
+  if (pollHandle !== null) window.clearInterval(pollHandle)
 })
 
 // Clear double mode if the turn moves away from us
