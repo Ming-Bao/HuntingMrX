@@ -55,7 +55,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Client } from '@stomp/stompjs'
 import SockJS from 'sockjs-client'
-import { startGame, leaveGame, kickPlayer } from '../api/gameApi'
+import { startGame, leaveGame, kickPlayer, getGame } from '../api/gameApi'
 import { WS_PATH } from '../utils/basePath'
 import { useGameStore } from '../stores/gameStore'
 import type { GameStateDTO } from '../types/game'
@@ -81,37 +81,58 @@ const abortMessage = ref('')
 
 let stompClient: Client | null = null
 
+// Shared by the live subscription and the reconnect catch-up fetch below —
+// same "what does this state mean for me" branching either way.
+function applyState(state: GameStateDTO): void {
+  const stillInGame = state.players.some(p => p.id === store.playerId)
+  if (!stillInGame && state.phase === 'LOBBY') {
+    stompClient?.deactivate()
+    store.clearGame()
+    kicked.value = true
+    return
+  }
+  store.updateGameState(state)
+  if (state.phase === 'IN_PROGRESS') {
+    stompClient?.deactivate()
+    router.push(`/game/${gameId.value}`)
+  } else if (state.phase === 'ENDED') {
+    stompClient?.deactivate()
+    aborted.value = true
+    abortMessage.value = state.abortReason ?? 'The game has ended'
+  }
+}
+
 onMounted(() => {
   if (gameId.value === 'preview') return
   stompClient = new Client({
     webSocketFactory: () => new SockJS(WS_PATH),
-    onConnect: () => {
+    onConnect: async () => {
+      // Catch-up fetch on every (re)connect, not just the first — the host
+      // can click Start in the exact window a connection is dropping, and
+      // the /topic broadcast for it is a one-shot push with no replay: if a
+      // client isn't connected at that instant, nothing ever resends it and
+      // that player is stuck in the lobby forever even though the game is
+      // running fine server-side. A REST re-check here means a reconnect
+      // (STOMP retries automatically) always catches up regardless of what
+      // was missed while disconnected.
+      if (store.playerId) {
+        try {
+          applyState(await getGame(gameId.value, store.playerId))
+        } catch {
+          // Ignore — the live subscription below still has a shot at it,
+          // and this was just a best-effort catch-up.
+        }
+      }
       stompClient!.subscribe(`/topic/games/${gameId.value}`, (msg) => {
-        const state: GameStateDTO = JSON.parse(msg.body)
-        const stillInGame = state.players.some(p => p.id === store.playerId)
-        if (!stillInGame && state.phase === 'LOBBY') {
-          stompClient?.deactivate()
-          store.clearGame()
-          kicked.value = true
-          return
-        }
-        store.updateGameState(state)
-        if (state.phase === 'IN_PROGRESS') {
-          stompClient?.deactivate()
-          router.push(`/game/${gameId.value}`)
-        } else if (state.phase === 'ENDED') {
-          stompClient?.deactivate()
-          aborted.value = true
-          abortMessage.value = state.abortReason ?? 'The game has ended'
-        }
+        applyState(JSON.parse(msg.body))
       })
     },
-    onDisconnect: () => {
-      if (!aborted.value && !kicked.value) {
-        aborted.value = true
-        abortMessage.value = 'Lost connection to the server'
-      }
-    },
+    // No onDisconnect handler: a dropped WebSocket is not the same thing as
+    // the game ending, and this network drops connections often enough that
+    // treating every blip as "Game ended" was stranding players who were
+    // actually fine a few seconds later once STOMP's automatic reconnect
+    // (and the catch-up fetch above) kicked back in. A real abort is a
+    // phase: 'ENDED' state from the server, handled in applyState.
   })
   stompClient.activate()
 })

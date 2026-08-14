@@ -92,7 +92,7 @@ import { ArrowLeft } from 'lucide-vue-next'
 import { useGameStore } from '../stores/gameStore'
 import { leaveGame, getMap, getGame, getValidMoves, submitMove } from '../api/gameApi'
 import { WS_PATH } from '../utils/basePath'
-import type { GraphNode, GraphEdge, DemoPlayer, DemoTicket, Role } from '../types/game'
+import type { GraphNode, GraphEdge, DemoPlayer, DemoTicket, Role, GameStateDTO } from '../types/game'
 import { MODE_COLORS, modeLabel } from '../utils/transportModes'
 import GameMap from '../components/game/GameMap.vue'
 import InfoPanel from '../components/game/InfoPanel.vue'
@@ -202,12 +202,49 @@ const turnBadgeClass = computed(() => ({
 
 let stompClient: Client | null = null
 
+// Shared by every place that gets a fresh GameStateDTO from somewhere other
+// than the live valid-moves push: initial mount, every WebSocket (re)connect
+// catch-up, and a move's own REST response (see confirmMove) — same "what
+// does this state mean for me" branching regardless of where it came from.
+async function applyState(state: GameStateDTO): Promise<void> {
+  store.updateGameState(state)
+  if (state.phase === 'ENDED') {
+    stompClient?.deactivate()
+    router.push(`/game/${gameId.value}/end`)
+    return
+  }
+  if (state.currentPlayerId === store.playerId && state.phase === 'IN_PROGRESS' && gameId.value && store.playerId) {
+    try {
+      const moves = await getValidMoves(gameId.value, store.playerId)
+      store.setValidMoves(moves.moves)
+    } catch { /* leave whatever valid-moves were already in the store */ }
+  }
+}
+
+// Shared by the initial mount and every WebSocket (re)connect — see
+// connectWs's onConnect for why re-running this on reconnect matters, not
+// just at first load.
+async function syncFromServer(): Promise<void> {
+  if (!store.playerId || !gameId.value || gameId.value === 'preview') return
+  try {
+    await applyState(await getGame(gameId.value, store.playerId))
+  } catch { /* use whatever was already in the store */ }
+}
+
 function connectWs() {
   if (!store.playerId || gameId.value === 'preview') return
 
   stompClient = new Client({
     webSocketFactory: () => new SockJS(WS_PATH),
     onConnect: () => {
+      // Catch-up fetch on every (re)connect, not just first mount. The
+      // valid-moves push especially is fire-and-forget with no replay: if
+      // the WebSocket happened to be down at the exact instant it became
+      // our turn, nothing ever resends it — without this, we'd be stuck
+      // showing no valid moves indefinitely even after reconnecting, since
+      // STOMP's automatic reconnect alone doesn't recover a missed message.
+      syncFromServer()
+
       // Per-player state topic
       stompClient!.subscribe(
         `/topic/games/${gameId.value}/players/${store.playerId}`,
@@ -245,23 +282,7 @@ onMounted(async () => {
     mapError.value = e instanceof Error ? e.message : 'Failed to load map'
   }
 
-  // Fetch current (role-filtered) game state
-  if (store.playerId && gameId.value && gameId.value !== 'preview') {
-    try {
-      const state = await getGame(gameId.value, store.playerId)
-      store.updateGameState(state)
-      if (state.phase === 'ENDED') {
-        router.push(`/game/${gameId.value}/end`)
-        return
-      }
-      // If it's already our turn, fetch valid moves
-      if (state.currentPlayerId === store.playerId && state.phase === 'IN_PROGRESS') {
-        const moves = await getValidMoves(gameId.value, store.playerId)
-        store.setValidMoves(moves.moves)
-      }
-    } catch { /* use whatever was already in the store */ }
-  }
-
+  await syncFromServer()
   connectWs()
 })
 
@@ -385,7 +406,14 @@ async function confirmMove() {
   doubleMode.value = false
   store.setValidMoves([])
   try {
-    await submitMove(gameId.value, store.playerId, nodeId, ticket)
+    // Apply the response directly instead of waiting on the WS broadcast to
+    // reflect our own move back to us — submitMove's REST response already
+    // *is* the fresh state, and depending purely on the topic push here
+    // meant a flaky connection at the exact moment we submit (the same
+    // network hiccups causing the WebSocket issues elsewhere in this app)
+    // could leave our own screen showing stale state even though the move
+    // went through fine server-side.
+    await applyState(await submitMove(gameId.value, store.playerId, nodeId, ticket))
   } catch (e) {
     moveError.value = e instanceof Error ? e.message : 'Move failed'
   } finally {
