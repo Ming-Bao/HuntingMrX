@@ -503,6 +503,12 @@ function addEdge(fromId, toId) {
 
   let coordinates;
 
+  // Ferries cross open water — there's no road-adjacent geometry to follow
+  // at all, unlike trains (which can still hug a rail-corridor-ish path) or
+  // buses/escooters (actual roads). Always point-to-point, unconditionally,
+  // ahead of and regardless of the train/road logic below.
+  const drawingFerry = activeModes.has('FERRY');
+
   // "Train" here means the node already carries a TRAIN edge (nodesGJ's
   // hasTrain), not the offRoad flag — offRoad is only ever set by the
   // auto-generator, so a manually-placed or merged station (offRoad false)
@@ -528,7 +534,7 @@ function addEdge(fromId, toId) {
     // mismatch — no rail-adjacent geometry to follow, so use a straight line.
     mixedTrainRoad = !drawingTrain;
   }
-  if (!roadData || !graphAdj.size || mixedTrainRoad) {
+  if (!roadData || !graphAdj.size || drawingFerry || mixedTrainRoad) {
     coordinates = [[from.lng, from.lat], [to.lng, to.lat]];
   } else {
     const fromSnap = snapToRoad(from.lng, from.lat);
