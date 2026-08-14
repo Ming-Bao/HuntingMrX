@@ -165,7 +165,7 @@ function selectMove(nodeId: number, mode: string) {
   @apply p-4 border-b border-gray-200 dark:border-gray-800;
 }
 .section-label {
-  @apply text-sm text-gray-500 uppercase tracking-wider mb-3;
+  @apply text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3;
 }
 .player-row {
   @apply flex items-center justify-between py-1.5;
@@ -178,23 +178,49 @@ function selectMove(nodeId: number, mode: string) {
          border border-white/20 shadow-sm;
 }
 .player-you {
-  @apply text-sm text-gray-500 dark:text-gray-600;
+  @apply text-sm text-gray-500 dark:text-gray-400;
 }
 .player-location {
-  @apply text-sm text-gray-500 font-mono;
+  @apply text-sm text-gray-500 dark:text-gray-400 font-mono;
 }
 .player-location--clickable {
   @apply cursor-pointer underline decoration-dotted underline-offset-2
          hover:text-gray-900 dark:hover:text-white transition-colors;
 }
 .waiting-msg {
-  @apply px-4 py-3 text-sm text-gray-500 dark:text-gray-600 italic;
+  @apply px-4 py-3 text-sm text-gray-500 dark:text-gray-400 italic;
 }
+/* overflow-y: scroll (not auto) so the scrollbar/gutter is always reserved,
+   not just when content happens to overflow — a list that's sometimes
+   scrollable and sometimes not otherwise shifts width each time the
+   scrollbar pops in, and gives no visual hint there's more below the fold
+   until you've already scrolled past it once. `scroll` alone doesn't force
+   the *thumb* to draw on macOS/GNOME's auto-hide overlay scrollbars though,
+   so the Firefox/WebKit rules below style a persistently-visible thin
+   scrollbar explicitly rather than relying on the OS default. */
 .reachable-section {
-  @apply max-h-56 overflow-y-auto;
+  @apply max-h-56 overflow-y-scroll;
+  scrollbar-width: thin;
+  scrollbar-color: #9ca3af transparent; /* gray-400 */
+}
+:global(.dark) .reachable-section {
+  scrollbar-color: #374151 transparent; /* gray-700 */
+}
+.reachable-section::-webkit-scrollbar {
+  width: 8px;
+}
+.reachable-section::-webkit-scrollbar-track {
+  background: transparent;
+}
+.reachable-section::-webkit-scrollbar-thumb {
+  background-color: #9ca3af; /* gray-400 */
+  border-radius: 9999px;
+}
+:global(.dark) .reachable-section::-webkit-scrollbar-thumb {
+  background-color: #374151; /* gray-700 */
 }
 .section-hint {
-  @apply text-xs text-gray-500 dark:text-gray-600 -mt-2 mb-3;
+  @apply text-xs text-gray-500 dark:text-gray-400 -mt-2 mb-3;
 }
 /* Each node gets its own card, not just a row — with 2+ ticket options the
    chips wrap to a second line, and without a boundary per node that read as

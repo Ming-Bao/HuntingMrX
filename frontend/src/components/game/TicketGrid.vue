@@ -48,7 +48,7 @@ defineEmits<{
   @apply p-4 border-b border-gray-200 dark:border-gray-800;
 }
 .section-label {
-  @apply text-sm text-gray-500 uppercase tracking-wider mb-3;
+  @apply text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3;
 }
 .ticket-grid {
   @apply grid grid-cols-2 gap-2;
@@ -75,7 +75,7 @@ defineEmits<{
   @apply text-sm font-semibold text-amber-500 dark:text-amber-400;
 }
 .cancel-btn {
-  @apply text-xs text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors underline;
+  @apply text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors underline;
 }
 .double-leg2 {
   @apply mt-2 py-2 px-3 rounded-lg text-sm font-semibold text-amber-500 dark:text-amber-400 bg-amber-600/10;

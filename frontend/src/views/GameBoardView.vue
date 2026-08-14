@@ -20,35 +20,24 @@
     </div>
 
     <!-- Popup: blocking, dismissed by a click anywhere on it. Role, turn-start
-         and Mr X reveal popups share this overlay and queue behind one
-         another (queued rather than stacked, since more than one can land at
-         once — e.g. role at mount plus an immediate first turn, or a reveal
-         round handing the turn straight to a detective) instead of flashing
-         two overlays on top of each other. -->
-    <div v-if="activePopup" class="turn-overlay" @click="dismissPopup">
+         and Mr X reveal popups share this overlay — when more than one is
+         queued at once (e.g. role at mount plus an immediate first turn, or
+         a reveal round handing the turn straight to a detective) they stack
+         inside one card instead of forcing a click through separate popups. -->
+    <div v-if="popupQueue.length" class="turn-overlay" @click="dismissPopup">
       <div class="turn-overlay-content">
-        <template v-if="activePopup.kind === 'role'">
-          <p class="turn-overlay-title" :class="activePopup.role === 'MR_X' ? 'turn-overlay-title--reveal' : 'turn-overlay-title--detective'">
-            You Are {{ activePopup.role === 'MR_X' ? 'Mr X' : 'a Detective' }}
-          </p>
-          <p class="turn-overlay-hint">
-            {{ activePopup.role === 'MR_X' ? 'Evade the detectives for 24 rounds.' : 'Track down Mr X before round 24.' }}
-            Click anywhere to begin.
-          </p>
-        </template>
-        <template v-else-if="activePopup.kind === 'turn'">
-          <p class="turn-overlay-title">Your Turn</p>
-          <p class="turn-overlay-hint">Click anywhere to continue</p>
-        </template>
-        <template v-else>
-          <p class="turn-overlay-title turn-overlay-title--reveal">
-            {{ store.myRole === 'MR_X' ? 'You’ve Been Revealed' : 'Mr X Revealed' }}
-          </p>
-          <p class="turn-overlay-hint">
-            {{ store.myRole === 'MR_X' ? 'Detectives can now see' : 'Spotted at' }}
-            Node {{ activePopup.nodeId }} — click anywhere to continue
-          </p>
-        </template>
+        <div
+          v-for="(popup, i) in popupQueue"
+          :key="i"
+          class="turn-overlay-block"
+          :class="{ 'turn-overlay-block--stacked': i > 0 }"
+        >
+          <p class="turn-overlay-title" :class="popupTitleClass(popup)">{{ popupTitle(popup) }}</p>
+          <p class="turn-overlay-hint">{{ popupHint(popup) }}</p>
+        </div>
+        <p class="turn-overlay-footer">
+          Click anywhere to {{ popupQueue.some(p => p.kind === 'role') ? 'begin' : 'continue' }}.
+        </p>
       </div>
     </div>
 
@@ -286,15 +275,33 @@ watch(() => store.isMyTurn, (nowMyTurn) => {
 })
 
 // Blocking popups — role announcement, "Your Turn", and Mr X reveal all
-// share one overlay via a small queue (see template) so they never fight for
-// the screen when more than one lands at once.
+// share one overlay (see template). When more than one lands at once (e.g.
+// role at mount plus an immediate first turn, or a reveal round handing the
+// turn straight to a detective) they're shown stacked in a single card
+// rather than as separate popups the player has to click through one at a
+// time — one click dismisses everything currently queued.
 type PopupEvent =
   | { kind: 'role'; role: Role }
   | { kind: 'turn' }
   | { kind: 'reveal'; nodeId: number }
 const popupQueue = ref<PopupEvent[]>([])
-const activePopup = computed(() => popupQueue.value[0] ?? null)
-function dismissPopup() { popupQueue.value.shift() }
+function dismissPopup() { popupQueue.value = [] }
+
+function popupTitle(p: PopupEvent): string {
+  if (p.kind === 'role') return `You Are ${p.role === 'MR_X' ? 'Mr X' : 'a Detective'}`
+  if (p.kind === 'turn') return 'Your Turn'
+  return store.myRole === 'MR_X' ? 'You’ve Been Revealed' : 'Mr X Revealed'
+}
+function popupTitleClass(p: PopupEvent): string | undefined {
+  if (p.kind === 'role') return p.role === 'MR_X' ? 'turn-overlay-title--reveal' : 'turn-overlay-title--detective'
+  if (p.kind === 'reveal') return 'turn-overlay-title--reveal'
+  return undefined
+}
+function popupHint(p: PopupEvent): string {
+  if (p.kind === 'role') return p.role === 'MR_X' ? 'Evade the detectives for 24 rounds.' : 'Track down Mr X before round 24.'
+  if (p.kind === 'turn') return 'It’s your move.'
+  return store.myRole === 'MR_X' ? `Detectives can now see Node ${p.nodeId}.` : `Spotted at Node ${p.nodeId}.`
+}
 
 // Role popup — announced once, right when we land on the game board and
 // know our role. Works whether we arrived straight from the lobby (role
@@ -468,6 +475,22 @@ async function handleLeave() {
 }
 .turn-overlay-hint {
   @apply mt-3 text-gray-300 text-sm;
+}
+/* Stacked blocks (a second+ queued popup) read as follow-up notices under
+   the primary announcement, not a second competing headline — smaller
+   title, tighter hint spacing, separated by a hairline rather than the
+   giant hero treatment reserved for whatever landed first. */
+.turn-overlay-block--stacked {
+  @apply mt-5 pt-5 border-t border-white/15;
+}
+.turn-overlay-block--stacked .turn-overlay-title {
+  @apply text-2xl tracking-normal;
+}
+.turn-overlay-block--stacked .turn-overlay-hint {
+  @apply mt-1.5;
+}
+.turn-overlay-footer {
+  @apply mt-6 text-xs uppercase tracking-widest text-white/40;
 }
 @keyframes turn-overlay-fade {
   from { opacity: 0; }

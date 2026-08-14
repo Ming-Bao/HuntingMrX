@@ -62,25 +62,25 @@ const nodeDisplayName = computed(() => {
   @apply p-4;
 }
 .section-label {
-  @apply text-sm text-gray-500 uppercase tracking-wider mb-1;
+  @apply text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1;
 }
 .node-name {
   @apply text-gray-900 dark:text-white font-medium text-base mb-3;
 }
 .ticket-hint {
-  @apply text-sm text-gray-500 italic mb-2;
+  @apply text-sm text-gray-500 dark:text-gray-400 italic mb-2;
 }
 .confirm-btn {
   @apply w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed
          text-white text-base font-medium py-2.5 rounded-lg transition-colors;
 }
 .move-error-msg {
-  @apply text-sm text-red-500 mb-2;
+  @apply text-sm text-red-500 dark:text-red-400 mb-2;
 }
 .no-connection {
-  @apply text-sm text-gray-600 italic;
+  @apply text-sm text-gray-600 dark:text-gray-400 italic;
 }
 .move-hint {
-  @apply text-sm text-gray-600 italic;
+  @apply text-sm text-gray-600 dark:text-gray-400 italic;
 }
 </style>
