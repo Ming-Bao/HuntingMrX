@@ -66,6 +66,17 @@ cat <<EOF
     # picked up under the backend's context-path same as /api above).
     # Needs the Upgrade/Connection headers for the raw WebSocket transport,
     # and a long read timeout so idle connections aren't dropped mid-game.
+    #
+    # proxy_buffering off matters just as much as the Upgrade headers above:
+    # SockJS falls back to xhr_streaming (a plain long-lived HTTP POST, not
+    # a protocol upgrade) whenever the browser/network won't complete a real
+    # WebSocket handshake. nginx's default buffering holds the backend's
+    # streamed frames until its buffer fills or the upstream closes, instead
+    # of forwarding them live — from the browser's side that looks exactly
+    # like the stream getting cut short right after it opens (a handful of
+    # bytes, then done) even though the backend is still trying to push to
+    # it. Only matters for this streaming fallback path — real WebSocket
+    # upgrades bypass proxy_buffering entirely once nginx sees 101.
     location $BASE/ws/ {
         proxy_pass http://127.0.0.1:8999;
         proxy_http_version 1.1;
@@ -73,6 +84,7 @@ cat <<EOF
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
         proxy_read_timeout 86400;
+        proxy_buffering off;
     }
 }
 EOF
