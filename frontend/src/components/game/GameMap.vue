@@ -43,6 +43,33 @@
         <span class="legend-label" :style="{ color: m.color }">{{ m.label }}</span>
       </div>
     </div>
+
+    <!-- Transport-picker popup: a second way to pick a move besides the
+         sidebar's Reachable Nodes list — click a reachable node here to see
+         the same ticket chips right at it. -->
+    <div
+      v-if="popupVisible && popupPos"
+      class="node-popup"
+      :style="{ left: `${popupPos.x}px`, top: `${popupPos.y}px` }"
+      @click.stop
+    >
+      <p class="node-popup-title">Node {{ popupNode?.id }}</p>
+      <div class="node-popup-modes">
+        <button
+          v-for="mode in popupModes"
+          :key="mode"
+          type="button"
+          class="mode-chip"
+          :style="{ backgroundColor: modeColor(mode) }"
+          :aria-label="`Move to node ${popupNode?.id} by ${modeLabel(mode)}`"
+          @click="selectPopupMode(mode)"
+        >
+          <component :is="modeIcon(mode)" :size="13" class="mode-chip-icon" />
+          {{ modeLabel(mode) }}
+        </button>
+      </div>
+      <div class="node-popup-arrow"></div>
+    </div>
   </div>
 </template>
 
@@ -50,8 +77,9 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import type { GraphNode, GraphEdge, DemoPlayer } from '../../types/game'
-import { MODE_COLORS, modeLegend } from '../../utils/transportModes'
+import { Scooter, Bus, TrainFront, Ship, EyeOff, type LucideIcon } from 'lucide-vue-next'
+import type { GraphNode, GraphEdge, DemoPlayer, ValidMoveDTO } from '../../types/game'
+import { MODE_COLORS, modeLegend, modeColor, modeLabel } from '../../utils/transportModes'
 
 const props = defineProps<{
   nodes: GraphNode[]
@@ -59,9 +87,27 @@ const props = defineProps<{
   displayPlayers: DemoPlayer[]
   selectedNode: GraphNode | null
   reachableIds?: Set<number>
+  validMoves?: ValidMoveDTO[]
 }>()
 
-const emit = defineEmits<{ 'select-node': [node: GraphNode | null] }>()
+const emit = defineEmits<{
+  'select-node': [node: GraphNode | null]
+  'select-ticket': [mode: string]
+}>()
+
+// Same glyph-per-ticket mapping as InfoPanel's Reachable Nodes list — the
+// map popup is a second entry point to the same action, so it should look
+// like the same control, not a different one.
+const MODE_ICONS: Record<string, LucideIcon> = {
+  ESCOOTER: Scooter,
+  BUS:      Bus,
+  TRAIN:    TrainFront,
+  FERRY:    Ship,
+  BLACK:    EyeOff,
+}
+function modeIcon(mode: string): LucideIcon | undefined {
+  return MODE_ICONS[mode]
+}
 
 const mapContainer = ref<HTMLDivElement>()
 let map: maplibregl.Map | null = null
@@ -146,7 +192,7 @@ const neighborIds = computed<Set<number> | null>(() => {
 })
 
 watch(() => props.selectedNode, n => {
-  if (n === null) { exploreNode.value = null; return }
+  if (n === null) { exploreNode.value = null; popupNode.value = null; return }
   // A direct map click sets exploreNode itself, synchronously, before this
   // watch ever runs — so if exploreNode doesn't already match the incoming
   // selection, it came from elsewhere (e.g. the sidebar). Clear it so a
@@ -166,6 +212,40 @@ const moveHighlightIds = computed<Set<number> | null>(() => {
   if (myNode.value) ids.add(myNode.value.id)
   return ids
 })
+
+// ── Transport-picker popup ──────────────────────────────────────────────────
+// Clicking a reachable node on the map is a second way to pick a move,
+// alongside the sidebar's Reachable Nodes list — a popup right at the node
+// shows the same ticket chips so you don't have to look away from the map
+// to see what you can travel there with.
+const popupNode = ref<GraphNode | null>(null)
+const popupPos = ref<{ x: number; y: number } | null>(null)
+
+// Gated on props.reachableIds rather than just "is popupNode set" — self-
+// heals if the node stops being reachable out from under it (turn ends,
+// valid moves refresh) without needing every state-clearing path elsewhere
+// in this file to remember to also clear popupNode explicitly.
+const popupVisible = computed(() =>
+  popupNode.value != null && !!props.reachableIds?.has(popupNode.value.id)
+)
+const popupModes = computed<string[]>(() => {
+  if (!popupVisible.value || !popupNode.value) return []
+  const move = props.validMoves?.find(m => m.nodeId === popupNode.value!.id)
+  return move ? [...new Set(move.ticketOptions)] : []
+})
+
+function updatePopupPos() {
+  if (!map || !popupNode.value) { popupPos.value = null; return }
+  const p = map.project([popupNode.value.lng, popupNode.value.lat])
+  popupPos.value = { x: p.x, y: p.y }
+}
+
+function selectPopupMode(mode: string) {
+  if (!popupNode.value) return
+  emit('select-node', popupNode.value)
+  emit('select-ticket', mode)
+  popupNode.value = null
+}
 
 // ── Map tile style catalogue ────────────────────────────────────────────────────
 
@@ -622,18 +702,32 @@ onMounted(() => {
       const node = props.nodes.find(n => n.id === nodeId) ?? null
       exploreNode.value = node
       emit('select-node', node)
+      // Reachable node: open the transport-picker popup right there too —
+      // a non-reachable node just clears it, same as clicking empty space.
+      if (node && props.reachableIds?.has(node.id)) {
+        popupNode.value = node
+        updatePopupPos()
+      } else {
+        popupNode.value = null
+      }
     })
 
     map.on('click', e => {
       const hit = map!.queryRenderedFeatures(e.point, { layers: ['nodes'] })
       if (!hit.length) {
         exploreNode.value = null
+        popupNode.value = null
         emit('select-node', null)
       }
     })
 
     map.on('mouseenter', 'nodes', () => { map!.getCanvas().style.cursor = 'pointer' })
     map.on('mouseleave', 'nodes', () => { map!.getCanvas().style.cursor = '' })
+
+    // Keep the popup pinned to its node through pan/zoom/rotate — cheap to
+    // call unconditionally, updatePopupPos itself no-ops when there's no
+    // open popup.
+    map.on('move', updatePopupPos)
   })
 })
 
@@ -711,5 +805,39 @@ watch(
 
 .legend-label {
   @apply text-xs;
+}
+
+/* Positioned via popupPos (map.project() screen coords), anchored above the
+   node with a small pointer — same floating-card language as the other map
+   overlays (bg-gray-900/95, border-gray-700), but the transport chips below
+   borrow InfoPanel's colored-pill treatment since those need per-mode color
+   coding to read consistently with the rest of the app. */
+.node-popup {
+  @apply absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+14px)]
+         bg-gray-900/95 border border-gray-700 rounded-lg shadow-lg
+         px-3 py-2.5 pointer-events-auto;
+  min-width: 9rem;
+}
+.node-popup-title {
+  @apply text-xs font-mono font-semibold text-gray-300 mb-2;
+}
+.node-popup-modes {
+  @apply flex flex-wrap gap-1.5;
+}
+.node-popup-arrow {
+  @apply absolute left-1/2 -bottom-[7px] -translate-x-1/2
+         w-3 h-3 rotate-45 bg-gray-900/95 border-r border-b border-gray-700;
+}
+.mode-chip {
+  @apply inline-flex items-center gap-1 text-xs text-white font-semibold
+         px-2 py-1 rounded-full cursor-pointer select-none
+         border border-white/25 shadow-sm shadow-black/30
+         hover:-translate-y-0.5 hover:shadow-md hover:border-white/70 hover:brightness-110
+         active:translate-y-0 active:brightness-95
+         focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
+         transition-all duration-150;
+}
+.mode-chip-icon {
+  @apply shrink-0 opacity-90;
 }
 </style>

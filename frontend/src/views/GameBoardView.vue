@@ -53,7 +53,9 @@
         :display-players="displayPlayers"
         :selected-node="selectedNode"
         :reachable-ids="reachableNodeIds"
+        :valid-moves="store.validMoves"
         @select-node="handleSelectNode"
+        @select-ticket="selectedTicket = $event"
       />
 
       <InfoPanel
