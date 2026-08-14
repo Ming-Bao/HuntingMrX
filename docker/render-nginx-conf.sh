@@ -38,7 +38,16 @@ cat <<EOF
     # Vue Router uses history mode (createWebHistory) — any path that isn't
     # a real static file falls back to index.html so client-side routing
     # can take over.
+    #
+    # The rewrite strips BASE before try_files runs: \`root\` resolves \$uri
+    # straight against the filesystem, but the built dist/ has no /mrx
+    # subdirectory — only the *URLs* Vite emits are prefixed (base), the
+    # physical output layout isn't. Without this, /mrx/assets/foo.js 404s
+    # against root/mrx/assets/foo.js and silently falls through to
+    # index.html, which the browser then rejects for a MIME-type mismatch
+    # (expected .js/.css, got text/html) — that's this exact bug.
     location $BASE/ {
+        rewrite ^$BASE/(.*)\$ /\$1 break;
         try_files \$uri \$uri/ /index.html;
     }
 
