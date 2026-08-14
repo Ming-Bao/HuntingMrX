@@ -12,6 +12,33 @@
 set -eu
 BASE="${1:-}"
 
+# Bare "/" only matters once the app has moved off the root — send it to
+# the prefixed root so bookmarks/links to the domain root still land on the
+# app instead of nginx's default 404. Skipped entirely when BASE is empty,
+# since "redirect / to /" would just be a loop.
+if [ -n "$BASE" ]; then
+  # map must live at the http{} context level, same as server{} below — this
+  # file gets included verbatim inside nginx.conf's http{} block (standard
+  # Debian/Ubuntu packaging's sites-enabled include), so both are valid here.
+  #
+  # Builds the scheme the ORIGINAL client actually used, for the redirect
+  # below: this container is never the outermost hop in production (it only
+  # binds 127.0.0.1, see update-container.sh) — whatever's in front
+  # (Cloudflare Tunnel, a university reverse proxy) terminates TLS and
+  # proxies to us over plain HTTP, so nginx's own $scheme here is always
+  # "http" even when the real visitor is on https. Trust X-Forwarded-Proto
+  # when the front door set it (Cloudflare Tunnel does by default); fall
+  # back to $scheme for a direct connection (e.g. testing localhost:PORT
+  # with nothing in front).
+  cat <<EOF
+map \$http_x_forwarded_proto \$redirect_scheme {
+    default \$http_x_forwarded_proto;
+    ''      \$scheme;
+}
+
+EOF
+fi
+
 cat <<EOF
 server {
     listen 80;
@@ -21,14 +48,18 @@ server {
     index index.html;
 EOF
 
-# Bare "/" only matters once the app has moved off the root — send it to
-# the prefixed root so bookmarks/links to the domain root still land on the
-# app instead of nginx's default 404. Skipped entirely when BASE is empty,
-# since "redirect / to /" would just be a loop.
+# Built as an absolute URL (scheme + $http_host, not just the bare path) —
+# a relative Location header depends on whatever's on the other end (the
+# browser, or an intermediate proxy relaying it) correctly resolving it
+# against the original request's host *and port*, which in practice hasn't
+# held up (e.g. localhost:8080/ redirecting to localhost/mrx/, silently
+# dropping the port). $http_host is the raw incoming Host header, so it
+# carries a non-default port through — $host would strip it the same way
+# the bare relative redirect was effectively doing.
 if [ -n "$BASE" ]; then
   cat <<EOF
     location = / {
-        return 301 $BASE/;
+        return 301 \$redirect_scheme://\$http_host$BASE/;
     }
 
 EOF
