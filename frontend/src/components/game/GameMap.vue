@@ -5,8 +5,9 @@
       v-if="myNode"
       class="jump-btn"
       title="Jump to my position"
+      aria-label="Jump to my position"
       @click="flyToMyNode"
-    >⊕</button>
+    ><LocateFixed :size="18" /></button>
     <div class="style-switcher">
       <button
         v-for="s in MAP_STYLES" :key="s.id"
@@ -77,7 +78,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { Scooter, Bus, TrainFront, Ship, EyeOff, type LucideIcon } from 'lucide-vue-next'
+import { Scooter, Bus, TrainFront, Ship, EyeOff, LocateFixed, type LucideIcon } from 'lucide-vue-next'
 import type { GraphNode, GraphEdge, DemoPlayer, ValidMoveDTO } from '../../types/game'
 import { MODE_COLORS, modeLegend, modeColor, modeLabel } from '../../utils/transportModes'
 
@@ -762,7 +763,7 @@ watch(
 .jump-btn {
   @apply absolute top-3 right-3 z-10
          w-9 h-9 rounded-lg
-         bg-gray-900/80 hover:bg-gray-800 text-white text-lg
+         bg-gray-900/80 hover:bg-gray-800 text-white
          flex items-center justify-center
          border border-gray-700 shadow transition-colors;
 }

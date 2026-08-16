@@ -24,18 +24,6 @@
         endorsed by Ravensburger.
       </p>
     </div>
-
-    <!-- Dev nav -->
-    <div class="dev-nav">
-      <div class="dev-nav-inner">
-        <span class="dev-label">DevNav</span>
-        <RouterLink to="/" class="dev-link">Landing</RouterLink>
-        <RouterLink to="/create" class="dev-link">Create</RouterLink>
-        <RouterLink to="/join" class="dev-link">Join</RouterLink>
-        <RouterLink to="/lobby/preview" class="dev-link">Lobby</RouterLink>
-        <RouterLink to="/game/preview" class="dev-link">Game Board</RouterLink>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -79,18 +67,5 @@ import { Users, UserPlus } from 'lucide-vue-next'
   @apply flex items-center justify-center gap-2 bg-gray-200 dark:bg-gray-700
          hover:bg-gray-300 dark:hover:bg-gray-600
          text-gray-800 dark:text-white font-medium py-3 px-6 rounded-lg transition-colors;
-}
-.dev-nav {
-  @apply absolute bottom-4 left-0 right-0 flex justify-center;
-}
-.dev-nav-inner {
-  @apply border border-gray-200 dark:border-gray-800 rounded-lg px-4 py-2 flex items-center gap-1;
-}
-.dev-label {
-  @apply text-gray-400 dark:text-gray-600 text-xs mr-2;
-}
-.dev-link {
-  @apply text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 text-xs px-2 py-1 rounded
-         hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors;
 }
 </style>
