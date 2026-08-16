@@ -4,7 +4,7 @@
       <PageHeader title="Create Game" @back="router.push('/')" />
 
       <div class="card">
-        <FormInput label="Your Name" v-model="hostName" placeholder="Enter your name" />
+        <FormInput label="Your Name" v-model="hostName" placeholder="Enter your name" :maxlength="20" />
 
         <div class="field">
           <label class="field-label">Max Players</label>

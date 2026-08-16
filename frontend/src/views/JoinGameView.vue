@@ -4,7 +4,7 @@
       <PageHeader title="Join Game" @back="router.push('/')" />
 
       <div class="card">
-        <FormInput label="Your Name" v-model="playerName" placeholder="Enter your name" />
+        <FormInput label="Your Name" v-model="playerName" placeholder="Enter your name" :maxlength="20" />
 
         <FormInput
           label="Game Code"

@@ -197,9 +197,15 @@ function selectMove(nodeId: number, mode: string) {
    until you've already scrolled past it once. `scroll` alone doesn't force
    the *thumb* to draw on macOS/GNOME's auto-hide overlay scrollbars though,
    so the Firefox/WebKit rules below style a persistently-visible thin
-   scrollbar explicitly rather than relying on the OS default. */
+   scrollbar explicitly rather than relying on the OS default.
+   max-height is viewport-relative (24vh), not a fixed px/rem value — a
+   fixed cap either wastes most of a tall monitor's screen on a handful of
+   rows, or still doesn't leave room for the rest of the sidebar (tickets,
+   move selector, leave button) on a short one. This section and the Mr X
+   Log below it can both be visible on your own turn, so 24vh each leaves
+   roughly half the panel for everything else regardless of screen size. */
 .reachable-section {
-  @apply max-h-56 overflow-y-scroll;
+  @apply max-h-[24vh] overflow-y-scroll;
   scrollbar-width: thin;
   scrollbar-color: #9ca3af transparent; /* gray-400 */
 }

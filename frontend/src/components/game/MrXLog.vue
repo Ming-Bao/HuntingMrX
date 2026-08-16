@@ -41,9 +41,9 @@ defineProps<{ log: MrXLogEntry[] }>()
 }
 /* Same always-visible-scrollbar treatment as InfoPanel's reachable-section —
    see the comment there for why `scroll` + explicit thumb styling instead
-   of a plain `overflow-y-auto`. */
+   of a plain `overflow-y-auto`, and why 24vh instead of a fixed px/rem cap. */
 .log-scroll {
-  @apply max-h-56 overflow-y-scroll;
+  @apply max-h-[24vh] overflow-y-scroll;
   scrollbar-width: thin;
   scrollbar-color: #9ca3af transparent; /* gray-400 */
 }

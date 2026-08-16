@@ -22,6 +22,7 @@ public class GameService {
     private static final int JOIN_CODE_LENGTH = 6;
     private static final Set<Integer> REVEAL_ROUNDS = Set.of(2, 8, 13, 18, 24);
     private static final long TURN_TIMEOUT_MS = 15 * 60 * 1000L;
+    private static final int MAX_NAME_LENGTH = 20;
 
     private final SecureRandom random = new SecureRandom();
 
@@ -52,6 +53,8 @@ public class GameService {
     public CreateResult createGame(String hostName, int maxPlayers) {
         if (hostName == null || hostName.isBlank())
             throw new IllegalArgumentException("Game not created");
+        if (hostName.trim().length() > MAX_NAME_LENGTH)
+            throw new IllegalArgumentException("Name must be " + MAX_NAME_LENGTH + " characters or fewer");
         if (maxPlayers < 2 || maxPlayers > 6)
             throw new IllegalArgumentException("Game not created");
 
@@ -75,6 +78,8 @@ public class GameService {
             throw new IllegalArgumentException("Join code is required");
         if (playerName == null || playerName.isBlank())
             throw new IllegalArgumentException("Player name is required");
+        if (playerName.trim().length() > MAX_NAME_LENGTH)
+            throw new IllegalArgumentException("Name must be " + MAX_NAME_LENGTH + " characters or fewer");
 
         GameSession session = gameRepository.findByJoinCode(joinCode.toUpperCase().trim())
                 .orElseThrow(() -> new GameNotFoundException("Game not found"));

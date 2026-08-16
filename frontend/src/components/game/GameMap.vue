@@ -686,6 +686,11 @@ onMounted(() => {
     style: 'https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json',
     center: [174.7762, -41.2865],
     zoom: 14,
+    // The Wellington graph only spans ~22km × 24km (map.json's node bounds)
+    // — zooming out past this just shows a shrinking dot surrounded by
+    // country/world with nothing on it. 10 keeps the whole network in view
+    // with comfortable margin without letting you scroll out to NZ-scale.
+    minZoom: 10,
     attributionControl: false,
   })
 
