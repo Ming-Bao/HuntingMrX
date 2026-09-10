@@ -1,0 +1,4 @@
+1. Move turn to the center
+2. Add the next reveal round to round 12
+3. Have reveal be between the rounds in the log 
+4. Don't abbreviate Rounds to R
