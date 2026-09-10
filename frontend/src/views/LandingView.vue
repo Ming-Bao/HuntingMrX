@@ -20,8 +20,7 @@
 
       <p class="attribution">
         Game mechanics based on the board game by Ravensburger. This is a
-        non-commercial student project and is not affiliated with or
-        endorsed by Ravensburger.
+        non-commercial student project and is not affiliated with Ravensburger.
       </p>
     </div>
   </div>

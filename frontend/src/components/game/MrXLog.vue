@@ -3,18 +3,25 @@
     <p class="section-label">Mr X Log</p>
     <div v-if="log.length === 0" class="log-empty">No moves yet</div>
     <div v-else class="log-scroll">
-      <div v-for="(entry, i) in log" :key="i" class="log-row">
-        <span class="log-round">
-          R{{ entry.round }}<span v-if="entry.leg === 2" class="log-leg">b</span>
-        </span>
-        <span class="log-chips">
-          <span v-if="entry.doubleMove" class="mode-chip chip-double">DOUBLE</span>
-          <span class="mode-chip" :style="{ backgroundColor: modeColor(entry.ticketUsed) }">
-            {{ modeLabel(entry.ticketUsed) }}
+      <template v-for="(entry, i) in log" :key="i">
+        <div class="log-row">
+          <span class="log-round">
+            Round {{ entry.round }}<span v-if="entry.leg === 2" class="log-leg">b</span>
           </span>
-          <span v-if="entry.nodeId != null" class="node-chip">{{ entry.nodeId }}</span>
-        </span>
-      </div>
+          <span class="log-chips">
+            <span v-if="entry.doubleMove" class="mode-chip chip-double">DOUBLE</span>
+            <span class="mode-chip" :style="{ backgroundColor: modeColor(entry.ticketUsed) }">
+              {{ modeLabel(entry.ticketUsed) }}
+            </span>
+          </span>
+        </div>
+        <!-- Reveal gets its own full-width row between rounds rather than a
+             chip stuck onto the move row, so "a move happened" and "Mr X was
+             spotted" read as two distinct events, not one crowded line. -->
+        <div v-if="entry.nodeId != null" class="log-reveal-row">
+          Mr X revealed at Node {{ entry.nodeId }}
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -81,15 +88,15 @@ defineProps<{ log: MrXLogEntry[] }>()
 .chip-double {
   @apply bg-amber-500;
 }
-/* The revealed node number is the single most important fact in this log —
-   it was previously the dimmest text in the whole panel (gray-400/500),
-   easy to miss entirely. Recast as a solid chip instead of plain dim text,
-   in the same red used for reveal moments elsewhere (the reveal popup, the
-   map ring) so "this is where Mr X was spotted" reads as one consistent
-   visual language across the app rather than a washed-out afterthought. */
-.node-chip {
-  @apply text-xs font-mono font-bold text-white
+/* The reveal is the single most important fact in this log — it was
+   previously just a dim inline number, easy to miss entirely. It now gets
+   its own full-width banner row between the round entries, in the same red
+   used for reveal moments elsewhere (the reveal popup, the map ring) so
+   "this is where Mr X was spotted" reads as a distinct event, not a
+   washed-out detail tacked onto a move row. */
+.log-reveal-row {
+  @apply text-xs font-mono font-bold text-white text-center
          bg-red-600 dark:bg-red-500
-         px-1.5 py-0.5 rounded ml-1;
+         px-1.5 py-1 my-1 rounded;
 }
 </style>

@@ -1,3 +1,13 @@
+Test round 1
+1. Name character limit
+2. Limit zoom out
+3. Moves need to be viewable as in it should be vertically tall enough
+4. Click on node and have popup saying transport types
+5. Ending screen should be able to to see the final state of the game
+6. More color diversity on the map
+7. Clicking a node then clicking another node highlights the first node you've clicked whether its connected or not
+
+Test round 2
 1. Move turn to the center
 2. Add the next reveal round to round 12
 3. Have reveal be between the rounds in the log 

@@ -10,12 +10,15 @@
           {{ store.myRole === 'MR_X' ? 'Mr. X' : 'Detective' }}
         </span>
       </div>
+      <div class="header-center">
+        <span class="turn-badge" :class="turnBadgeClass">{{ turnLabel }}</span>
+        <span v-if="gameState?.mrXDoubleMovePending" class="double-badge">Double Move — 2nd leg</span>
+      </div>
       <div class="header-right">
         <span class="round-label">
           Round <span class="round-num">{{ gameState?.round ?? 1 }}</span> / 24
         </span>
-        <span class="turn-badge" :class="turnBadgeClass">{{ turnLabel }}</span>
-        <span v-if="gameState?.mrXDoubleMovePending" class="double-badge">Double Move — 2nd leg</span>
+        <span v-if="nextReveal" class="next-reveal-label">Next reveal: Round {{ nextReveal }}</span>
       </div>
     </div>
 
@@ -94,6 +97,7 @@ import { ArrowLeft } from 'lucide-vue-next'
 import { useGameStore } from '../stores/gameStore'
 import { leaveGame, getMap, getGame, getValidMoves, submitMove } from '../api/gameApi'
 import { WS_PATH } from '../utils/basePath'
+import { nextRevealRound } from '../utils/revealRounds'
 import type { GraphNode, GraphEdge, DemoPlayer, DemoTicket, Role, GameStateDTO } from '../types/game'
 import { MODE_COLORS, modeLabel } from '../utils/transportModes'
 import GameMap from '../components/game/GameMap.vue'
@@ -199,6 +203,10 @@ const turnBadgeClass = computed(() => ({
   'turn-badge--detective': gameState.value?.turnPhase === 'DETECTIVE_TURN',
   'turn-badge--mine':      store.isMyTurn,
 }))
+
+// Display-only hint of the next scheduled reveal round; naturally disappears
+// once the schedule is exhausted (see utils/revealRounds.ts).
+const nextReveal = computed(() => nextRevealRound(gameState.value?.round ?? 1))
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
@@ -456,20 +464,25 @@ async function handleLeave() {
 .page {
   @apply h-screen bg-gray-50 dark:bg-gray-950 flex flex-col overflow-hidden;
 }
+/* Three-column grid (not flex justify-between) so the turn badge stays
+   visually centered regardless of how wide the left/right groups get. */
 .header {
-  @apply bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-3 flex items-center justify-between shrink-0;
+  @apply bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-3
+         grid grid-cols-[1fr_auto_1fr] items-center gap-3 shrink-0;
 }
 .header-left {
-  @apply flex items-center gap-3;
+  @apply flex items-center gap-3 justify-self-start;
 }
 .back-btn {
   @apply text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors;
 }
 .game-title  { @apply text-gray-900 dark:text-white font-bold; }
 .game-subtitle { @apply text-gray-500 dark:text-gray-600 text-sm font-mono; }
-.header-right { @apply flex items-center gap-3; }
+.header-center { @apply flex items-center gap-3 justify-self-center; }
+.header-right { @apply flex items-center gap-3 justify-self-end; }
 .round-label  { @apply text-gray-600 dark:text-gray-400 text-sm; }
 .round-num    { @apply text-gray-900 dark:text-white font-mono; }
+.next-reveal-label { @apply text-gray-500 dark:text-gray-500 text-xs italic; }
 .turn-badge {
   @apply text-sm px-3 py-1 rounded-full bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 transition-colors;
 }

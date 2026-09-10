@@ -272,7 +272,7 @@ class FullGameE2ETest {
         // After 3 rounds, Mr X has moved at least once per round → ≥ 3 entries (or fewer if game ended early).
         assertThat(log.size()).isGreaterThanOrEqualTo(1);
 
-        Set<Integer> revealRounds = Set.of(3, 8, 13, 18, 24);
+        Set<Integer> revealRounds = Set.of(2, 8, 13, 18, 24);
         for (JsonNode entry : log) {
             assertThat(entry.get("round").asInt()).isGreaterThan(0);
             assertThat(entry.get("leg").asInt()).isIn(1, 2);
