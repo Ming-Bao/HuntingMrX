@@ -32,7 +32,7 @@ info:
     **Kick detection** — a client should check on each push whether
     their own `playerId` is still present in `players`. If it is not
     and `phase` is still `LOBBY`, the client was kicked.
-  version: 0.1.10
+  version: 0.1.11
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -97,7 +97,7 @@ paths:
       description: |
         Joins a LOBBY-phase game identified by its join code. Returns the joining
         player's ID and the updated game state. Also broadcasts the updated
-        `GameStateDTO` to `/topic/games/{gameId}` so all lobby subscribers see
+        `GameState` to `/topic/games/{gameId}` so all lobby subscribers see
         the new player immediately.
       operationId: joinGame
       requestBody:
@@ -172,7 +172,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GameStateDTO'
+                $ref: '#/components/schemas/GameState'
         '404':
           description: Game not found
           content:
@@ -193,7 +193,7 @@ paths:
         2 DOUBLE, N BLACK/"Invisible" where N = detective count); the rest
         become `DETECTIVE` (finite ticket counts from server config).
 
-        Broadcasts the updated `GameStateDTO` to `/topic/games/{gameId}` — all
+        Broadcasts the updated `GameState` to `/topic/games/{gameId}` — all
         lobby subscribers detect `phase: IN_PROGRESS` and navigate to the game
         board.
       operationId: startGame
@@ -213,7 +213,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GameStateDTO'
+                $ref: '#/components/schemas/GameState'
         '400':
           description: Not enough players (minimum 2 required)
           content:
@@ -279,7 +279,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidMovesDTO'
+                type: array
+                items:
+                  $ref: '#/components/schemas/ValidMove'
         '400':
           description: It is not this player's turn
           content:
@@ -320,7 +322,7 @@ paths:
         increments. At round 24 Mr X wins.
 
         After a successful move the server broadcasts the updated
-        `GameStateDTO` to all per-player topics and pushes new valid moves
+        `GameState` to all per-player topics and pushes new valid moves
         to the next active player.
       operationId: submitMove
       parameters:
@@ -330,7 +332,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MoveRequestDTO'
+              $ref: '#/components/schemas/MoveRequest'
             example:
               playerId: 550e8400-e29b-41d4-a716-446655440000
               toNodeId: 42
@@ -341,7 +343,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GameStateDTO'
+                $ref: '#/components/schemas/GameState'
         '400':
           description: Move is invalid (wrong turn, invalid node, insufficient tickets)
           content:
@@ -383,7 +385,7 @@ paths:
 
         **Kick behaviour:**
         - Only valid during `LOBBY`. Host cannot kick themselves.
-        - Broadcasts updated `GameStateDTO`; kicked client detects removal by
+        - Broadcasts updated `GameState`; kicked client detects removal by
           checking that their `playerId` is absent from `players`.
       operationId: removePlayer
       parameters:
@@ -449,7 +451,7 @@ paths:
 # OpenAPI 3.1.0 has no native WebSocket support. The `webhooks` section is
 # used here to formally describe server-initiated STOMP messages — each entry
 # is one topic the client can subscribe to. The payload schema is the same
-# GameStateDTO used by the REST endpoints.
+# GameState used by the REST endpoints.
 # ---------------------------------------------------------------------------
 webhooks:
 
@@ -459,7 +461,7 @@ webhooks:
       description: |
         **STOMP topic:** `/topic/games/{gameId}`
 
-        The server publishes a `GameStateDTO` to this topic during the lobby
+        The server publishes a `GameState` to this topic during the lobby
         phase after join, kick, and leave operations. Subscribe immediately
         after creating or joining a game. Unsubscribe once `phase` transitions
         to `IN_PROGRESS` (switch to the per-player topic instead).
@@ -482,7 +484,7 @@ webhooks:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GameStateDTO'
+              $ref: '#/components/schemas/GameState'
       responses:
         '200':
           description: Client acknowledges the message (STOMP ACK).
@@ -493,7 +495,7 @@ webhooks:
       description: |
         **STOMP topic:** `/topic/games/{gameId}/players/{playerId}`
 
-        The server publishes a role-filtered `GameStateDTO` to each player's
+        The server publishes a role-filtered `GameState` to each player's
         own topic after every in-progress state change (move submission, turn
         advancement, win/abort). Subscribe on game board mount using the
         viewer's own `playerId`. The payload hides Mr X's `nodeId` from
@@ -520,7 +522,7 @@ webhooks:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GameStateDTO'
+              $ref: '#/components/schemas/GameState'
       responses:
         '200':
           description: Client acknowledges the message (STOMP ACK).
@@ -531,12 +533,12 @@ webhooks:
       description: |
         **STOMP topic:** `/topic/games/{gameId}/players/{playerId}/valid-moves`
 
-        The server publishes a `ValidMovesDTO` to the active player at the
-        start of their turn (immediately after `startGame` for Mr X; after each
-        move submission for the next player). Subscribe on game board mount
-        alongside the per-player state topic.
+        The server publishes a bare array of `ValidMove` to the active player
+        at the start of their turn (immediately after `startGame` for Mr X;
+        after each move submission for the next player). Subscribe on game
+        board mount alongside the per-player state topic.
 
-        The client uses the `moves` list to highlight reachable nodes on the
+        The client uses this array to highlight reachable nodes on the
         map and populate the ticket-picker. Call
         `GET /api/games/{id}/valid-moves?playerId={pid}` if the push is missed.
 
@@ -549,7 +551,9 @@ webhooks:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ValidMovesDTO'
+              type: array
+              items:
+                $ref: '#/components/schemas/ValidMove'
       responses:
         '200':
           description: Client acknowledges the message (STOMP ACK).
@@ -591,7 +595,7 @@ components:
           format: uuid
           description: UUID assigned to the host; must be stored client-side
         gameState:
-          $ref: '#/components/schemas/GameStateDTO'
+          $ref: '#/components/schemas/GameState'
 
     JoinGameRequest:
       type: object
@@ -617,7 +621,7 @@ components:
           format: uuid
           description: UUID assigned to the joining player; must be stored client-side
         gameState:
-          $ref: '#/components/schemas/GameStateDTO'
+          $ref: '#/components/schemas/GameState'
 
     StartGameRequest:
       type: object
@@ -638,7 +642,7 @@ components:
             UUID of the player making the request. Required when the host is
             kicking another player. Omit for a voluntary leave.
 
-    MoveRequestDTO:
+    MoveRequest:
       type: object
       required: [playerId, toNodeId, ticket]
       properties:
@@ -655,7 +659,7 @@ components:
             Ticket to consume. Use `DOUBLE` to initiate a double move (Mr X only).
             On the second leg of a double move, provide the real transport ticket.
 
-    ValidMoveDTO:
+    ValidMove:
       type: object
       required: [nodeId, ticketOptions]
       properties:
@@ -672,16 +676,7 @@ components:
             (shown to players as "Invisible").
             For detectives, only the transport modes of the connecting edge.
 
-    ValidMovesDTO:
-      type: object
-      required: [moves]
-      properties:
-        moves:
-          type: array
-          items:
-            $ref: '#/components/schemas/ValidMoveDTO'
-
-    MrXLogEntryDTO:
+    MrXLogEntryView:
       type: object
       required: [round, leg, ticketUsed]
       properties:
@@ -701,7 +696,7 @@ components:
             Mr X's destination node. Non-null only on the final leg of a reveal
             round (rounds 2, 8, 13, 18, 24). Null on all other entries.
 
-    GameStateDTO:
+    GameState:
       type: object
       required: [gameId, joinCode, phase, maxPlayers, players, round]
       properties:
@@ -721,7 +716,7 @@ components:
         players:
           type: array
           items:
-            $ref: '#/components/schemas/PlayerDTO'
+            $ref: '#/components/schemas/PlayerView'
         round:
           type: integer
           minimum: 0
@@ -746,7 +741,7 @@ components:
           type: array
           nullable: true
           items:
-            $ref: '#/components/schemas/MrXLogEntryDTO'
+            $ref: '#/components/schemas/MrXLogEntryView'
           description: |
             Chronological log of Mr X's moves. Null during lobby phase.
             In detective-view responses, `nodeId` is null except on reveal-round entries.
@@ -758,7 +753,7 @@ components:
             has already been sent; other players are blocked until the second move
             is submitted.
 
-    PlayerDTO:
+    PlayerView:
       type: object
       required: [id, name]
       properties:

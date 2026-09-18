@@ -150,7 +150,7 @@ class FullGameE2ETest {
             String currentId = state.get("currentPlayerId").asText();
             JsonNode moves   = api("GET",
                     "/api/games/" + gameId + "/valid-moves?playerId=" + currentId, null);
-            JsonNode list    = moves.path("moves");
+            JsonNode list    = moves;
 
             if (list.isArray() && !list.isEmpty()) {
                 JsonNode first  = list.get(0);
@@ -252,7 +252,7 @@ class FullGameE2ETest {
             String currentId = state.get("currentPlayerId").asText();
             JsonNode moves   = api("GET",
                     "/api/games/" + gameId + "/valid-moves?playerId=" + currentId, null);
-            JsonNode list    = moves.path("moves");
+            JsonNode list    = moves;
             if (list.isArray() && !list.isEmpty()) {
                 JsonNode first = list.get(0);
                 String ticket  = first.get("ticketOptions").get(0).asText();
@@ -307,7 +307,7 @@ class FullGameE2ETest {
         // Get a node the current player could move to.
         JsonNode moves = api("GET",
                 "/api/games/" + gameId + "/valid-moves?playerId=" + currentId, null);
-        JsonNode list = moves.path("moves");
+        JsonNode list = moves;
         assertThat(list.isArray() && !list.isEmpty())
                 .as("Current player must have at least one valid move")
                 .isTrue();

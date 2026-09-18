@@ -4,16 +4,12 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
 
-public class DetectivePlayer implements Player {
+public class DetectivePlayer extends AbstractPlayer {
 
-    private final String id;
-    private final String name;
-    private Integer nodeId;
     private final Map<TicketType, Integer> tickets;
 
     public DetectivePlayer(String id, String name, int escooter, int bus, int train, int ferry) {
-        this.id = id;
-        this.name = name;
+        super(id, name);
         EnumMap<TicketType, Integer> t = new EnumMap<>(TicketType.class);
         t.put(TicketType.ESCOOTER, escooter);
         t.put(TicketType.BUS,      bus);
@@ -22,11 +18,7 @@ public class DetectivePlayer implements Player {
         this.tickets = t;
     }
 
-    @Override public String getId() { return id; }
-    @Override public String getName() { return name; }
     @Override public Role getRole() { return Role.DETECTIVE; }
-    @Override public Integer getNodeId() { return nodeId; }
-    @Override public void setNodeId(Integer nodeId) { this.nodeId = nodeId; }
     @Override public Map<TicketType, Integer> getTickets() { return Collections.unmodifiableMap(tickets); }
 
     @Override

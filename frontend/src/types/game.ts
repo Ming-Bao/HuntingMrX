@@ -47,7 +47,3 @@ export interface ValidMoveDTO {
   nodeId: number
   ticketOptions: string[]
 }
-
-export interface ValidMovesDTO {
-  moves: ValidMoveDTO[]
-}

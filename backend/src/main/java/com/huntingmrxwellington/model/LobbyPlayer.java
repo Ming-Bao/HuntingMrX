@@ -2,22 +2,13 @@ package com.huntingmrxwellington.model;
 
 import java.util.Map;
 
-public class LobbyPlayer implements Player {
-
-    private final String id;
-    private final String name;
-    private Integer nodeId;
+public class LobbyPlayer extends AbstractPlayer {
 
     public LobbyPlayer(String id, String name) {
-        this.id = id;
-        this.name = name;
+        super(id, name);
     }
 
-    @Override public String getId() { return id; }
-    @Override public String getName() { return name; }
     @Override public Role getRole() { return null; }
-    @Override public Integer getNodeId() { return nodeId; }
-    @Override public void setNodeId(Integer nodeId) { this.nodeId = nodeId; }
     @Override public Map<TicketType, Integer> getTickets() { return null; }
     @Override public Integer getTicket(TicketType ticket) { return null; }
 

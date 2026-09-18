@@ -1,7 +1,7 @@
 package com.huntingmrxwellington.controller;
 
 import tools.jackson.databind.ObjectMapper;
-import com.huntingmrxwellington.dto.GameStateDTO;
+import com.huntingmrxwellington.dto.GameState;
 import com.huntingmrxwellington.exception.ConflictException;
 import com.huntingmrxwellington.exception.ForbiddenException;
 import com.huntingmrxwellington.exception.GameNotFoundException;
@@ -309,26 +309,13 @@ class GameControllerTest {
     // Helpers
     // -------------------------------------------------------------------------
 
-    private GameStateDTO lobbyState(String gameId) {
-        GameStateDTO dto = new GameStateDTO();
-        dto.setGameId(gameId);
-        dto.setJoinCode("ABC123");
-        dto.setPhase(GamePhase.LOBBY);
-        dto.setMaxPlayers(4);
-        dto.setPlayers(List.of());
-        dto.setRound(0);
-        return dto;
+    private GameState lobbyState(String gameId) {
+        return new GameState(gameId, "ABC123", GamePhase.LOBBY, 4, List.of(),
+                0, null, null, null, null, List.of(), false);
     }
 
-    private GameStateDTO inProgressState(String gameId) {
-        GameStateDTO dto = new GameStateDTO();
-        dto.setGameId(gameId);
-        dto.setJoinCode("ABC123");
-        dto.setPhase(GamePhase.IN_PROGRESS);
-        dto.setMaxPlayers(4);
-        dto.setPlayers(List.of());
-        dto.setRound(1);
-        dto.setTurnPhase(TurnPhase.MR_X_TURN);
-        return dto;
+    private GameState inProgressState(String gameId) {
+        return new GameState(gameId, "ABC123", GamePhase.IN_PROGRESS, 4, List.of(),
+                1, TurnPhase.MR_X_TURN, null, null, null, List.of(), false);
     }
 }

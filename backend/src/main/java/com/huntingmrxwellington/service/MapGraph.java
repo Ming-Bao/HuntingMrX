@@ -2,7 +2,7 @@ package com.huntingmrxwellington.service;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import com.huntingmrxwellington.dto.ValidMoveDTO;
+import com.huntingmrxwellington.dto.ValidMove;
 import com.huntingmrxwellington.model.TicketType;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
@@ -80,12 +80,12 @@ public class MapGraph {
      * @param doubleMovePending true when Mr X is submitting the second leg of a double move
      * @param blockedNodes      nodes the mover cannot move to (detectives' positions for Mr X)
      */
-    public List<ValidMoveDTO> validMoves(int fromNodeId,
+    public List<ValidMove> validMoves(int fromNodeId,
                                          Map<TicketType, Integer> tickets,
                                          boolean isMrX,
                                          boolean doubleMovePending,
                                          Set<Integer> blockedNodes) {
-        List<ValidMoveDTO> result = new ArrayList<>();
+        List<ValidMove> result = new ArrayList<>();
 
         for (GraphEdge edge : adjacency.getOrDefault(fromNodeId, List.of())) {
             if (blockedNodes.contains(edge.to())) continue;
@@ -108,7 +108,7 @@ public class MapGraph {
 
             if (opts.isEmpty()) continue; // can't reach this node at all
 
-            result.add(new ValidMoveDTO(edge.to(), new ArrayList<>(opts)));
+            result.add(new ValidMove(edge.to(), new ArrayList<>(opts)));
         }
 
         return result;

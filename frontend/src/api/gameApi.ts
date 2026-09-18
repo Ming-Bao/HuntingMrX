@@ -1,4 +1,4 @@
-import type { GameStateDTO, MapData, ValidMovesDTO } from "../types/game";
+import type { GameStateDTO, MapData, ValidMoveDTO } from "../types/game";
 import { API_BASE } from "../utils/basePath";
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -69,7 +69,7 @@ export async function kickPlayer(gameId: string, hostId: string, targetPlayerId:
     return handleNoContent(res);
 }
 
-export async function getValidMoves(gameId: string, playerId: string): Promise<ValidMovesDTO> {
+export async function getValidMoves(gameId: string, playerId: string): Promise<ValidMoveDTO[]> {
     const res = await fetch(`${API_BASE}/games/${gameId}/valid-moves?playerId=${playerId}`);
     return handleResponse(res);
 }

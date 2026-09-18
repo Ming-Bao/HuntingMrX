@@ -227,7 +227,7 @@ async function applyState(state: GameStateDTO): Promise<void> {
   if (state.currentPlayerId === store.playerId && state.phase === 'IN_PROGRESS' && gameId.value && store.playerId) {
     try {
       const moves = await getValidMoves(gameId.value, store.playerId)
-      store.setValidMoves(moves.moves)
+      store.setValidMoves(moves)
     } catch { /* leave whatever valid-moves were already in the store */ }
   }
 }
@@ -273,7 +273,7 @@ function connectWs() {
         `/topic/games/${gameId.value}/players/${store.playerId}/valid-moves`,
         msg => {
           const data = JSON.parse(msg.body)
-          store.setValidMoves(data.moves ?? [])
+          store.setValidMoves(data ?? [])
         }
       )
     },
@@ -403,7 +403,7 @@ watch(
     if (nowMyTurn && store.validMoves.length === 0 && gameId.value && store.playerId) {
       try {
         const moves = await getValidMoves(gameId.value, store.playerId)
-        store.setValidMoves(moves.moves)
+        store.setValidMoves(moves)
       } catch { /* ignore */ }
     }
   }
