@@ -34,7 +34,7 @@ stateDiagram-v2
 
 ### Mr X states
 
-His turn starts with a check that he can move at all: if detectives hold every neighbouring node, the detectives win. **AwaitingMove** tracks whether he's active or idle; after 15 minutes without a move the server aborts the game. Network errors enter the client's reconnect loop (STOMP retries indefinitely, and the client re-syncs over REST every 6 s).
+His turn starts with a check that he can move at all: if detectives hold every neighbouring node, the detectives win. Every leg he plays is logged. The first leg of a double move (sent as `DOUBLE_<ticket>`) is never revealed and hands the turn straight back to him with a fresh idle clock; any other leg on a reveal round reveals the node he ends on. If he goes 15 minutes without moving, the server aborts the game. Network errors enter the client's reconnect loop (STOMP retries indefinitely, and the client re-syncs over REST on every reconnect and every 6 s).
 
 ```mermaid
 stateDiagram-v2
@@ -44,23 +44,14 @@ stateDiagram-v2
     CheckingBoxedIn --> DetectivesWin : NoLegalMove
     CheckingBoxedIn --> AwaitingMove : HasLegalMove
 
-    state AwaitingMove {
-        [*] --> Active
-        Active --> Idle : NoActivityTimeout
-        Idle --> Active : ActivityReceived
-    }
-
     AwaitingMove --> ValidatingMove : MoveSubmitted
     AwaitingMove --> GameAborted : TurnIdle15Min
     AwaitingMove --> Reconnecting : NetworkError
     Reconnecting --> AwaitingMove : ReconnectSuccess
 
     ValidatingMove --> AwaitingMove : MoveInvalid
-    ValidatingMove --> ApplyingSingleMove : MoveValidSingle
-    ValidatingMove --> ApplyingDoubleMove : MoveValidDouble
-    ApplyingSingleMove --> Logging : MoveApplied
-    ApplyingDoubleMove --> AwaitingMove : FirstLegApplied
-    ApplyingDoubleMove --> Logging : SecondLegApplied
+    ValidatingMove --> Logging : MoveValid
+    Logging --> AwaitingMove : FirstLegOfDouble
     Logging --> Revealed : RevealRound
     Logging --> Hidden : OtherRound
     Revealed --> [*] : MoveComplete
@@ -73,33 +64,27 @@ stateDiagram-v2
 
 ### Detective states
 
-Same active/idle tracking, idle limit and reconnect path as Mr X. A detective with no legal move is skipped without spending a ticket.
+A detective with no legal move is skipped without spending a ticket and never gets the turn. Otherwise the same idle limit and reconnect path apply as for Mr X. When the turn is over it passes to the next detective who can move, or the round ends.
 
 ```mermaid
 stateDiagram-v2
     direction TB
 
-    [*] --> AwaitingDetMove
-
-    state AwaitingDetMove {
-        [*] --> Active
-        Active --> Idle : NoActivityTimeout
-        Idle --> Active : ActivityReceived
-    }
+    [*] --> CheckingMoves
+    CheckingMoves --> Skipped : NoValidMoves
+    CheckingMoves --> AwaitingDetMove : HasValidMoves
 
     AwaitingDetMove --> ValidatingMove : MoveSubmitted
-    AwaitingDetMove --> Skipped : NoValidMoves
     AwaitingDetMove --> GameAborted : TurnIdle15Min
     AwaitingDetMove --> Reconnecting : NetworkError
     Reconnecting --> AwaitingDetMove : ReconnectSuccess
 
     ValidatingMove --> AwaitingDetMove : MoveInvalid
-    ValidatingMove --> ApplyingMove : MoveValid
-    ApplyingMove --> CheckingCatch : MoveApplied
+    ValidatingMove --> CheckingCatch : MoveApplied
     CheckingCatch --> DetectivesWin : Caught
-    CheckingCatch --> Skipped : NotCaught
-    Skipped --> AwaitingDetMove : NextDetective
-    Skipped --> [*] : AllDetectivesMoved
+    CheckingCatch --> TurnOver : NotCaught
+    Skipped --> TurnOver
+    TurnOver --> [*]
     DetectivesWin --> [*]
     GameAborted --> [*]
 ```

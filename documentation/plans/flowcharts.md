@@ -47,21 +47,21 @@ flowchart TD
     F -- no valid ticket --> E
     F -- ticket available --> G[Use ticket]
     G --> H{Double ticket?}
-    H -- yes, first leg --> I1[Submit DOUBLE_ticket leg]
+    H -- yes, first leg --> I1[Submit DOUBLE_ticket leg\nvalidated and logged, never revealed]
     I1 --> E
     H -- no --> I[Submit move]
     I --> J{Server validates}
     J -- invalid --> E
-    J -- valid --> K[Decrement ticket in server state]
+    J -- valid --> K[Spend ticket, log the leg]
     K --> R{Reveal round?\nrounds 2,8,13,18,24}
-    R -- yes --> RA[Log and show position to detectives]
+    R -- yes --> RA[Show position to detectives]
     R -- no --> L
     RA --> L([Advance to Detective turn])
 ```
 
 ---
 
-### Detective states
+### Detective flow
 
 ``` mermaid
 flowchart TD
@@ -80,10 +80,10 @@ flowchart TD
     K -- no catch --> M{All detectives moved?}
     E --> M
     M -- no --> C
-    M -- yes --> N[Increment round]
-    N --> O{final round?}
+    M -- yes --> O{Was that round 24?}
     O -- yes --> P([Mr. X wins!])
-    O -- no --> Q([Next Mr. X turn])
+    O -- no --> N[Increment round]
+    N --> Q([Next Mr. X turn])
   
 ```
 

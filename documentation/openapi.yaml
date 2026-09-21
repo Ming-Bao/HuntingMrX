@@ -45,7 +45,12 @@ info:
     **Kick detection:** a client should check on each push whether its own
     `playerId` is still present in `players`. If it isn't and `phase` is
     still `LOBBY`, the client was kicked.
-  version: 0.1.12
+
+    ## Path prefix
+
+    When the server runs with `BASE_PATH` set (e.g. `/mrx`), every REST path
+    and the `/ws` endpoint sit under that prefix (`/mrx/api/...`, `/mrx/ws`).
+  version: 0.1.13
 servers:
   - url: http://localhost:8999
     description: Local development server
@@ -58,9 +63,11 @@ paths:
       description: |
         Returns the pre-computed Wellington graph currently configured via
         `game.map-file` in `application.properties`. The backend reads that
-        file from the classpath and streams it as JSON — so swapping the
-        property (e.g. `test-map.json` → `map.json`) changes what both the
-        game engine and the frontend receive without any frontend change.
+        file from the classpath once at startup and serves it as-is, so
+        swapping the property (e.g. `test-map.json` → `map.json`) changes what
+        both the game engine and the frontend receive without any frontend
+        change. A missing or invalid map file stops the server from starting,
+        so this endpoint never reports it.
 
         The frontend fetches this once on game board mount.
       operationId: getMap
@@ -71,8 +78,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MapData'
-        '500':
-          description: Configured map file not found in classpath
 
   /api/games/create:
     post:
@@ -219,7 +224,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GameState'
         '400':
-          description: Not enough players (minimum 2)
+          description: Not enough players (minimum 2), or the map has fewer nodes than players
           content:
             application/json:
               schema:
@@ -343,7 +348,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GameState'
         '400':
-          description: Invalid move (no such edge, wrong or used-up ticket, Mr X onto a detective, bad double) or a malformed body
+          description: Invalid move (missing `toNodeId` or `ticket`, unknown ticket, no such edge, wrong or used-up ticket, Mr X onto a detective, bad double) or a malformed body
           content:
             application/json:
               schema:
@@ -472,7 +477,7 @@ webhooks:
               $ref: '#/components/schemas/GameState'
       responses:
         '200':
-          description: Client acknowledges the message (STOMP ACK).
+          description: No reply; the client's subscriptions use STOMP's automatic acknowledgement.
 
   perPlayerGameStatePush:
     post:
@@ -498,6 +503,8 @@ webhooks:
         **Client-side reactions:**
         - `phase === 'ENDED'`: navigate to `/game/{id}/end`
         - `mrXDoubleMovePending === true`: show the "second leg" banner and wait for the new valid-moves push
+        - A new `mrXLog` entry with a `nodeId`: show the reveal popup (to Mr X and to detectives)
+        - `currentPlayerId` becomes this player's id: show the "Your Turn" popup
         - Update map markers and ticket counts from the new state
       requestBody:
         description: This player's view of the game.
@@ -507,7 +514,7 @@ webhooks:
               $ref: '#/components/schemas/GameState'
       responses:
         '200':
-          description: Client acknowledges the message (STOMP ACK).
+          description: No reply; the client's subscriptions use STOMP's automatic acknowledgement.
 
   validMovesPush:
     post:
@@ -533,7 +540,7 @@ webhooks:
                 $ref: '#/components/schemas/ValidMove'
       responses:
         '200':
-          description: Client acknowledges the message (STOMP ACK).
+          description: No reply; the client's subscriptions use STOMP's automatic acknowledgement.
 
 components:
 
@@ -649,7 +656,7 @@ components:
 
     MrXMove:
       type: object
-      required: [round, leg, ticketUsed, doubleMove]
+      required: [round, leg, ticketUsed, nodeId, doubleMove]
       properties:
         round:
           type: integer
@@ -661,8 +668,7 @@ components:
         ticketUsed:
           $ref: '#/components/schemas/TicketType'
         nodeId:
-          type: integer
-          nullable: true
+          type: [integer, 'null']
           description: |
             Mr X's destination. Non-null only on the final leg of a reveal
             round (2, 8, 13, 18, 24), the same for every viewer.
@@ -672,7 +678,9 @@ components:
 
     GameState:
       type: object
-      required: [gameId, joinCode, phase, maxPlayers, players, round, mrXLog, mrXDoubleMovePending]
+      description: Every field is always present; the nullable ones are sent as `null`.
+      required: [gameId, joinCode, phase, maxPlayers, players, round, turnPhase, currentPlayerId,
+                 winner, abortReason, mrXLog, mrXDoubleMovePending]
       properties:
         gameId:
           type: string
@@ -697,20 +705,21 @@ components:
           minimum: 0
           description: Current round (0 in the lobby, then 1 to 24)
         turnPhase:
-          $ref: '#/components/schemas/TurnPhase'
-          nullable: true
           description: Null outside IN_PROGRESS
+          anyOf:
+            - $ref: '#/components/schemas/TurnPhase'
+            - type: 'null'
         currentPlayerId:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
           description: Public id of the player whose turn it is; null outside IN_PROGRESS
         winner:
-          $ref: '#/components/schemas/Winner'
-          nullable: true
+          description: Set when the game ends with a winner; null otherwise
+          anyOf:
+            - $ref: '#/components/schemas/Winner'
+            - type: 'null'
         abortReason:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: Why the game ended without a winner, e.g. "The host left the game" or "Alice has left the game"
         mrXLog:
           type: array
@@ -723,7 +732,7 @@ components:
 
     PlayerView:
       type: object
-      required: [id, name]
+      required: [id, name, role, nodeId, tickets]
       properties:
         id:
           type: string
@@ -732,21 +741,21 @@ components:
         name:
           type: string
         role:
-          $ref: '#/components/schemas/Role'
-          nullable: true
           description: Null until the game starts
+          anyOf:
+            - $ref: '#/components/schemas/Role'
+            - type: 'null'
         nodeId:
-          type: integer
-          nullable: true
+          type: [integer, 'null']
           description: Current node; null until the game starts. Mr X's is null for other viewers unless he was revealed this round.
         tickets:
-          type: object
-          nullable: true
+          type: [object, 'null']
           description: |
             Ticket counts keyed by TicketType; null until the game starts.
             `-1` means unlimited (Mr X's transport tickets).
-            Mr X holds: ESCOOTER(-1), BUS(-1), TRAIN(-1), FERRY(-1), DOUBLE(2), BLACK(one per detective).
-            Detectives hold: ESCOOTER, BUS, TRAIN, FERRY with counts from server config; no DOUBLE or BLACK.
+            Mr X starts with: ESCOOTER(-1), BUS(-1), TRAIN(-1), FERRY(-1), DOUBLE(2), BLACK(one per detective).
+            Detectives start with: ESCOOTER, BUS, TRAIN, FERRY with counts from server config; no DOUBLE or BLACK.
+            Every player's counts are visible to everyone.
           additionalProperties:
             type: integer
           example:
@@ -817,6 +826,9 @@ components:
         label:
           type: string
           description: Human-readable node name
+        offRoad:
+          type: boolean
+          description: Set by the map creator (`mapCreator/`) for nodes placed off the road network; the game ignores it
 
     GraphEdge:
       type: object

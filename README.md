@@ -1,15 +1,15 @@
 # Hunting Mr. X: Wellington Edition
 
-A browser-based, real-time hidden-movement game played over an actual graph of Wellington's transport network — not a fictional board, the real bus routes, train lines, ferry crossing, and e-scooter zones of the city, as 261 nodes and 436 edges one player can vanish into and four others have to search.
+A browser-based, real-time hidden-movement game played over an actual graph of Wellington's transport network — not a fictional board, the real bus routes, train lines, ferry crossing, and e-scooter zones of the city, as 216 nodes and 372 edges one player can vanish into and up to five others have to search.
 
 ![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk&logoColor=white)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3-6DB33F?logo=springboot&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4-6DB33F?logo=springboot&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![MapLibre GL](https://img.shields.io/badge/MapLibre%20GL-4-396CB2?logo=maplibre&logoColor=white)
 ![License](https://img.shields.io/badge/License-GPL--3.0-blue)
 
-One player is **Mr X**. Everyone else is a **Detective**. Mr X's position is hidden from the moment the round starts, surfacing only on five scheduled reveal rounds — everyone else has to reconstruct where he's gone from nothing but the transport ticket he was forced to spend to get there. Detectives see each other and coordinate in the open; Mr X sees nothing but the map and plays alone against the clock, 24 rounds, no rematch.
+One player is **Mr X**. Everyone else is a **Detective**. Mr X's position is hidden from the moment the round starts, surfacing only on five scheduled reveal rounds — everyone else has to reconstruct where he's gone from nothing but the transport ticket he was forced to spend to get there. Detectives see each other and coordinate in the open; Mr X sees everyone but plays alone against the clock, 24 rounds, no rematch.
 
 ---
 
@@ -31,7 +31,7 @@ Movement runs on four transport modes, each tied to a ticket and a colour on the
 
 A move needs a ticket matching the mode of the edge being crossed. Detectives hold a fixed budget per game (12 escooter / 8 bus / 6 train / 2 ferry, configurable) and never get more — spend them badly and you're stuck. Mr X never runs out of the four regular tickets, but also holds a small number of two special ones:
 
-- **Invisible** (`BLACK`) — travel any edge, any mode, no matching ticket required. Detectives see that an invisible ticket was used, never which mode it disguised.
+- **Invisible** (`BLACK`) — travel any edge, any mode, no matching ticket required. Detectives see that an invisible ticket was used, never which mode it disguised. He gets one per detective.
 - **`DOUBLE`** — take two moves in one turn before any detective responds. Rare (2 per game) and the only way to put real distance between two reveals.
 
 **Reveal rounds** are fixed: 2, 8, 13, 18, 24. On those rounds, the node Mr X ends his move on is shown to every detective and logged. Between reveals he's a ticket trail and nothing else.
@@ -53,17 +53,17 @@ Browser (Vue 3 + MapLibre GL)
                                      ├── REST controllers
                                      ├── STOMP broker
                                      ├── game engine (pure Java, in memory)
-                                     └── ConcurrentHashMap<gameId, GameSession>
+                                     └── ConcurrentHashMap<gameId, Game>
 ```
 
-All authoritative state lives server-side in memory — no database, restarting the server ends every active game. The client only ever holds a role-filtered display copy pushed over WebSocket, which is how Mr X's hidden position stays hidden: the server never sends it to detectives outside a reveal round in the first place. The Wellington graph itself is a static JSON file the frontend fetches once on load, not a live routing API — see [`documentation/spec.md`](documentation/spec.md#3-wellington-graph) for why that tradeoff was made.
+All authoritative state lives server-side in memory — no database, restarting the server ends every active game. The client only ever holds a role-filtered display copy pushed over WebSocket, which is how Mr X's hidden position stays hidden: the server never sends it to detectives outside a reveal round in the first place. The Wellington graph itself is a static JSON file the backend loads at startup and the game board fetches once from `/api/map`, not a live routing API — see [`documentation/spec.md`](documentation/spec.md#3-wellington-graph) for why that tradeoff was made.
 
 | Layer | Technology |
 |---|---|
 | Frontend | Vue 3, Vite, Tailwind CSS, TypeScript |
 | Map | MapLibre GL |
-| Backend | Java 21, Spring Boot 3, Maven |
-| Real-time | Websocket |
+| Backend | Java 21, Spring Boot 4, Maven |
+| Real-time | STOMP over SockJS (WebSocket) |
 | API contract | [`documentation/openapi.yaml`](documentation/openapi.yaml) — REST + WebSocket, kept in sync with every API change |
 
 ---

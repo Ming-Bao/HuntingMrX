@@ -1,5 +1,7 @@
 # Backend Class Diagrams
 
+PlantUML source. A Mermaid version that renders on GitHub, with a package diagram, is in [`class-graph.md`](class-graph.md).
+
 ## High-Level Overview
 
 ```plantuml
@@ -187,5 +189,25 @@ GameService --> GameSettings
 GameService ..> JoinResponse : creates
 GameController --> GameService : delegates
 MapController --> MapGraph : serves JSON
+
+' ── Errors ────────────────────────────────────────────────────────────
+
+class GameNotFoundException <<RuntimeException>>
+class ForbiddenException <<RuntimeException>>
+class ConflictException <<RuntimeException>>
+
+class ApiExceptionHandler <<ControllerAdvice>> {
+    GameNotFoundException → 404
+    ForbiddenException → 403
+    ConflictException → 409
+    IllegalArgumentException, unreadable body → 400
+    error body: JSON with one "error" field
+}
+
+Game ..> GameNotFoundException : throws
+Game ..> ForbiddenException : throws
+Game ..> ConflictException : throws
+GameService ..> GameNotFoundException : throws
+GameService ..> ForbiddenException : throws
 @enduml
 ```

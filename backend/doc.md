@@ -30,6 +30,7 @@ Settings live in `src/main/resources/application.properties` and nowhere else:
 | Property | Default | Description |
 |---|---|---|
 | `server.port` | `8999` | HTTP port |
+| `server.servlet.context-path` | empty (`${BASE_PATH:}`) | URL prefix for REST and `/ws` when deployed under a path, e.g. `BASE_PATH=/mrx`; the frontend build reads the same variable |
 | `game.map-file` | `map.json` | Board file under `src/main/resources/static/`; `test-map.json` is a 5-node board for quick manual tests |
 | `game.turn-timer-seconds` | `900` | A game is aborted if the current player hasn't moved for this long |
 | `game.detective-escooter-tickets` | `12` | E-scooter tickets per detective |
@@ -41,8 +42,10 @@ Settings live in `src/main/resources/application.properties` and nowhere else:
 
 - `game/`: the rules engine in plain Java (`Game`, `Player`, `MapGraph`) and the views sent to clients. No Spring in here.
 - `service/GameService`: keeps the live games, locks around every call, checks player tokens, and publishes the new state over STOMP after every change.
-- `controller/`: the REST endpoints and the error-to-status mapping.
+- `controller/`: the REST endpoints and the error-to-status mapping (`ApiExceptionHandler`).
+- `exception/`: the three errors the rules throw, mapped to 404, 403 and 409.
 - `config/`: `GameSettings` (the `game.*` properties) and `WebSocketConfig`.
+- `HuntingMrXApplication`: loads the map once at startup; a missing or invalid map file stops the server from starting.
 
 The full REST and STOMP contract is in `documentation/openapi.yaml`.
 

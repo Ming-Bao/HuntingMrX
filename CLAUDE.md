@@ -10,7 +10,7 @@ ENGR489 capstone project: **Hunting Mr. X: Wellington Edition** — a web-based 
 
 **Ticket naming note**: the `BLACK` ticket (`TicketType.BLACK` in code, `TicketType` enum in `openapi.yaml`) is shown to players as the **Invisible ticket**. The wire/enum value stays `BLACK` — only the player-facing name changed (see `frontend/src/utils/transportModes.ts` for the existing label mapping). Docs should say "Invisible ticket" in prose and reserve `BLACK` for literal enum/wire-value references.
 
-Implementation is well underway. The backend is a Spring Boot app (`backend/`) with a working game engine — REST + WebSocket controllers, game/lobby/turn models, ticket and move validation, and unit/e2e tests. The frontend is a Vue 3 + Vite + Pinia + Tailwind app (`frontend/`) with lobby and game views, a Pinia store, and a MapLibre GL map wired to the backend's map data over STOMP/WebSocket. `documentation/openapi.yaml` tracks the live REST + WebSocket surface as it evolves (see the sync rule below).
+Implementation is well underway. The backend is a Spring Boot app (`backend/`): a plain-Java rules core (`game/`) behind a thin `GameService`, REST controllers, a STOMP broker, and a full test suite (see Evaluation Methods). The frontend is a Vue 3 + Vite + Pinia + Tailwind app (`frontend/`) with lobby and game views, a Pinia store, and a MapLibre GL map wired to the backend's map data over STOMP/WebSocket. `documentation/openapi.yaml` tracks the live REST + WebSocket surface as it evolves (see the sync rule below).
 
 ## Running the Map API Benchmark
 
@@ -32,9 +32,9 @@ GOOGLE_MAPS_API_KEY=your_key_here
 
 **Client–server, real-time WebSocket communication.**
 
-- **Backend**: Spring Boot game engine enforcing the game rules — player roles, turn management, movement validation, ticket tracking, win conditions, session management (`GameService`, `MapGraph`, `GameController`, `WebSocketConfig`).
+- **Backend**: Spring Boot game engine enforcing the game rules — player roles, turn management, movement validation, ticket tracking, win conditions, session management (`Game`, `GameService`, `MapGraph`, `GameController`, `WebSocketConfig`).
 - **Frontend**: Vue 3 map UI (MapLibre GL) allowing players to view available moves, select transport, and track game state, backed by a Pinia store and STOMP over WebSocket.
-- **Map layer**: static graph JSON (`map.json`/`test-map.json`), not routing-API-based. API routing was ruled out early — too costly and too slow for the number of edges required. The map graph is served statically and loaded by `MapGraph` at startup.
+- **Map layer**: static graph JSON (`map.json`/`test-map.json`), not routing-API-based. API routing was ruled out early — too costly and too slow for the number of edges required. The map file is loaded into `MapGraph` once at startup and served to the frontend at `GET /api/map`.
 
 ## Game State Machine
 
@@ -62,7 +62,7 @@ Documented in `documentation/plans/states-diagrams.md`:
 Update whenever you:
 - Add, remove, or rename an endpoint
 - Change a request body or response shape
-- Add a new enum variant to `GamePhase`, `TurnPhase`, `Role`, or `TicketType`
+- Add a new enum variant to `GamePhase`, `TurnPhase`, `Role`, `Winner`, or `TicketType`
 
 → Update the matching `paths:` entry and `components/schemas:` section.
 
@@ -83,12 +83,16 @@ Do **not** skip this step even for small changes. The OpenAPI file is the single
 
 ## Documentation Layout
 
-- `documentation/openapi.yaml` — OpenAPI 3.1.0 spec (keep in sync with controllers)
-- `documentation/plans/` — state diagrams and game flowcharts (Mermaid)
+- `documentation/openapi.yaml` — OpenAPI 3.1.0 spec for REST and the STOMP topics (keep in sync with the code)
+- `documentation/plans/` — state diagrams, game flowcharts, and package and class graphs for the backend (`class-graph.md`) and frontend (`frontend-graph.md`), all Mermaid; the detailed diagrams are also in draw.io (`class-graph.drawio`, `frontend-graph.drawio`), and `classdiagram.md` is the backend class diagram in PlantUML
 - `documentation/test_map_api/` — map library benchmarks, timing results, per-library notes
 - `documentation/project_proposal/` — original proposal (LaTeX source + PDFs)
 - `documentation/spec.md` — living spec
 - `documentation/backend-fixes.md`: bugs found in the 2026-09-21 backend review, with cause, fix, regression test and status
+- `documentation/final_report/`: final report outline (LaTeX, IEEEtran) and its built PDF
+- `documentation/presentation/`: the Trimester 1 progress presentation (5 June 2026), as presented
+- `documentation/user-testing/`: raw feedback from the two user-testing rounds
+- `docs/superpowers/`: design spec and implementation plan for the 2026-09-21 backend rewrite
 - `backend/doc.md` — backend setup/run guide (lives next to the code it documents, not under `documentation/`)
 - `frontend/doc.md` — frontend setup/run guide (same reasoning)
 

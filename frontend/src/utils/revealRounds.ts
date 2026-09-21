@@ -1,4 +1,4 @@
-// Mirrors the backend's GameService.REVEAL_ROUNDS (Set.of(2, 8, 13, 18, 24)).
+// Mirrors the backend's Game.REVEAL_ROUNDS (Set.of(2, 8, 13, 18, 24)).
 // Display-only: the server remains the sole authority on when a reveal
 // actually happens, so this doesn't affect game logic — just lets the UI
 // show an upcoming-reveal hint without a round-trip.

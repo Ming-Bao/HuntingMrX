@@ -4,10 +4,10 @@
 
 | Layer | Technology |
 |---|---|
-| Frontend framework | Vue.js 3 + Pinia (state management) + Vue Router |
+| Frontend framework | Vue.js 3 + Pinia (state management) + Vue Router, TypeScript, Tailwind CSS 4 |
 | Map library | MapLibre GL v4 |
-| Map tiles | CartoDB Dark NoLabels raster tiles (free, no API key) |
-| Backend framework | Java 21 + Spring Boot 3 |
+| Map tiles | CARTO basemap vector styles without labels: Dark Matter by default, Positron and Voyager selectable on the board (free, no API key) |
+| Backend framework | Java 21 + Spring Boot 4 |
 | Real-time comms | STOMP over SockJS (Spring WebSocket) |
 | Build tools | Vite (frontend), Maven (backend) |
 | Containerisation | Docker (single container, two processes under `supervisord`: Spring Boot on `:8999`, nginx on `:80` serving the built frontend and reverse-proxying `/api` and `/ws` to the backend — see `Dockerfile`, `docker/`) |
@@ -29,11 +29,11 @@ Four modes: `ESCOOTER`, `BUS`, `TRAIN`, `FERRY`.
 
 Each edge in the graph declares the mode(s) that traverse it. A player may only move along an edge if they hold a ticket matching at least one of that edge's modes.
 
-Map rendering uses one distinct colour per mode:
-- Escooter — green
-- Bus — blue
-- Train — orange
-- Ferry — purple
+Map rendering uses one distinct colour per mode (hex values in §8.1):
+- Escooter: green
+- Bus: red
+- Train: purple
+- Ferry: cyan
 
 ### 2.3 Ticket Allocation
 
@@ -112,42 +112,39 @@ In the lobby, a non-host player who leaves is simply removed; the host leaving c
 
 ### 3.1 File Format
 
-One static file, served by the Spring Boot backend from `src/main/resources/static/`:
-
-**`map.json`** — nodes and edges with inline road geometry:
+The board is one JSON file in `backend/src/main/resources/static/`, named by `game.map-file` (`map.json` by default). The backend reads it once at startup and serves it at `GET /api/map`. A missing file, an unknown mode or an edge to a node that doesn't exist stops the server from starting.
 
 ```json
 {
   "nodes": [
-    { "id": 1, "lat": -41.2787, "lng": 174.7798 },
-    { "id": 2, "lat": -41.2841, "lng": 174.7756 }
+    { "id": 1, "lat": -41.2787, "lng": 174.7798, "label": "1", "offRoad": false },
+    { "id": 2, "lat": -41.2841, "lng": 174.7756, "label": "2", "offRoad": false }
   ],
   "edges": [
     {
       "from": 1,
       "to": 2,
-      "modes": ["bus", "escooter"],
-      "geometry": {
-        "coordinates": [[174.7798, -41.2787], [174.7820, -41.2801], [174.7756, -41.2841]]
-      }
+      "modes": ["BUS", "ESCOOTER"],
+      "coordinates": [[174.7798, -41.2787], [174.7820, -41.2801], [174.7756, -41.2841]]
     }
   ]
 }
 ```
 
-- `id` is a unique integer.
+- `id` is a unique integer; `label` is its display name.
 - `from`/`to` reference node `id` integers.
-- `geometry.coordinates` is an array of `[lng, lat]` pairs (GeoJSON coordinate order), pre-computed from OSM road data — not generated at runtime.
-- Edges are **undirected** — movement is valid in both directions.
-- `modes` is a non-empty array of lowercase mode strings.
+- `modes` is a non-empty array of `ESCOOTER`, `BUS`, `TRAIN` or `FERRY` (uppercase, the `TicketType` names).
+- `coordinates` is an array of `[lng, lat]` pairs (GeoJSON coordinate order) drawn as the edge, pre-computed from OSM road data, not generated at runtime.
+- Edges are **undirected**: movement is valid in both directions. If two edges join the same pair of nodes, their modes are merged.
+- `offRoad` is written by the map creator and ignored by the game.
 
 ### 3.2 Scope
 
-The actual Wellington node set is a separate task. Format is fixed by this spec. Target: 50–150 nodes covering Wellington CBD and inner suburbs, connected by the four transport modes wherever real Wellington infrastructure exists.
+`map.json` has 216 nodes and 372 edges spanning about 22 km × 24 km of the Wellington region (edge-mode counts: 323 e-scooter, 257 bus, 9 train, 2 ferry). It was built with the map creator in `mapCreator/`. `test-map.json` is a 5-node, 7-edge board for quick manual tests.
 
 ### 3.3 Starting Positions
 
-On game start the server randomly assigns each player a distinct node. Mr X's starting node is **never sent to detectives** — it is stored server-side only and excluded from detective-view `PlayerDTO` objects.
+On game start the server randomly assigns each player a distinct node. Mr X's starting node is **never sent to detectives**: his `nodeId` is null in every view but his own until a reveal round.
 
 ---
 
@@ -164,11 +161,11 @@ Browser (Vue.js + Pinia + MapLibre GL)
                                      ├── WebSocket STOMP Broker
                                      ├── Game Engine (pure Java)
                                      └── In-memory store
-                                           ConcurrentHashMap<gameId, GameSession>
+                                           ConcurrentHashMap<gameId, Game>
 ```
 
-- All authoritative game state lives in memory on the server. The client holds only a display copy received via WebSocket.
-- `map.json` is served as a static file — the frontend fetches it once on page load.
+- All authoritative game state lives in memory on the server. The client holds only a display copy received over REST and WebSocket.
+- The map file is read once at startup and served at `GET /api/map`; the game board fetches it when it mounts.
 - No database in v1. Restarting the server terminates all active games.
 - In the Docker deployment, nginx serves the compiled Vue frontend and reverse-proxies `/api` and `/ws` to Spring Boot in the same container (see the Containerisation row above). For local development, the Vite dev server proxies the same paths instead (`frontend/vite.config.ts`).
 
@@ -254,37 +251,40 @@ When building the view for a given player:
 
 ### 8.1 Colour Palette
 
-| Role | Tailwind class | Hex |
-|---|---|---|
-| Page background | `bg-gray-950` | `#0a0a0a` |
-| Card / panel | `bg-gray-900` / `bg-gray-800` | `#111827` / `#1f2937` |
-| Primary action | `bg-blue-600` | `#2563eb` |
-| Secondary action | `bg-gray-700` | `#374151` |
-| Success / start | `bg-green-600` | `#16a34a` |
-| Destructive | `bg-red-600` | `#dc2626` |
-| Body text | `text-white` | — |
-| Muted text | `text-gray-400` | `#9ca3af` |
+There are two themes, dark (the default) and light. The sun/moon button switches between them on every page except the game board and end screen, and the choice is kept in `localStorage`. The classes below are the dark theme; components pair each with a lighter class for the light theme (e.g. `bg-gray-50 dark:bg-gray-950` on the board). Tailwind 4 defines these colours in OKLCH, so the class is the reference, not a hex value.
 
-**Transport mode colours** (map polylines + ticket UI):
+| Role | Tailwind class (dark theme) |
+|---|---|
+| Page background | `bg-gray-950` |
+| Card / panel | `bg-gray-900` / `bg-gray-800` |
+| Primary action | `bg-blue-600` |
+| Secondary action | `bg-gray-700` |
+| Success / start | `bg-green-600` |
+| Destructive | `bg-red-600` |
+| Body text | `text-white` |
+| Muted text | `text-gray-400` |
 
-| Mode | Tailwind class | Hex |
-|---|---|---|
-| Escooter | `text-amber-500` / `bg-amber-500` | `#f59e0b` |
-| Bus | `text-red-500` / `bg-red-500` | `#ef4444` |
-| Train | `text-orange-500` / `bg-orange-500` | `#f97316` |
-| Ferry | `text-cyan-500` / `bg-cyan-500` | `#06b6d4` |
+**Transport mode colours** (map lines and ticket UI), from `frontend/src/utils/transportModes.ts`:
+
+| Mode | Hex |
+|---|---|
+| Escooter | `#22c55e` (green) |
+| Bus | `#ef4444` (red) |
+| Train | `#8b5cf6` (purple) |
+| Ferry | `#06b6d4` (cyan) |
+| Invisible (`BLACK`) | `#64748b` (grey; ticket UI only, no map lines) |
 
 ### 8.2 Typography
 
-System font stack: `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`. No custom web font in v1.
+Tailwind's default system font stacks: `font-sans` for text, `font-mono` for join codes. No web fonts are loaded.
 
 ### 8.3 Icons
 
-Lucide Vue Next (`lucide-vue-next` package) — the Vue port of Lucide React used in the Figma reference. Key icons: `Users`, `UserPlus`, `Trophy`, `Clipboard`, `Check`, `ArrowLeft`.
+Lucide (`lucide-vue-next`), the Vue port of the Lucide icons used in the Figma reference. Icons in use: `Users` and `UserPlus` (landing page), `ArrowLeft` (page headers), `ClipboardCopy` and `Check` (copy buttons), `Sun` and `Moon` (theme toggle), `Trophy` (end screen), `Scooter`, `Bus`, `TrainFront`, `Ship` and `EyeOff` (transport modes and the Invisible ticket), and `LocateFixed` (centre the map on your node).
 
 ### 8.4 Border Radius
 
-`0.625rem` globally (matches shadcn/ui default). Applied via Tailwind `rounded-lg` on cards and buttons.
+No global override. Cards and buttons use Tailwind's `rounded-lg` (0.5rem); badges and pills use `rounded-full`.
 
 ---
 
@@ -292,114 +292,91 @@ Lucide Vue Next (`lucide-vue-next` package) — the Vue port of Lucide React use
 
 ### 9.1 Landing Page (`/`)
 
-Layout: vertically centred, full-viewport-height, `bg-gray-950`.
+Layout: vertically centred, full-viewport-height, `bg-gray-950` (white in the light theme). The theme toggle sits in the top-right corner here and on every other page except the game board and end screen.
 
-Structure (top → bottom, centred):
+Structure (top to bottom, centred):
 
 1. **Hero block**
-   - Title: "Hunting Mr. X" — white, `text-4xl font-bold`
-   - Subtitle: "Wellington Edition" — `text-blue-400`, lighter weight
-   - Tagline: "Hunt down Mr. X across Wellington's streets" — `text-gray-400 text-sm`
+   - Title: "Hunting Mr. X", `text-4xl font-bold`
+   - Subtitle: "Wellington Edition", `text-blue-400 italic text-lg`
+   - Tagline: "Hunt down Mr. X across Wellington's streets", `text-sm` muted
+2. **Button group** (stacked)
+   - **Create Game**: `bg-blue-600`, `Users` icon, routes to `/create`
+   - **Join Game**: `bg-gray-700`, `UserPlus` icon, routes to `/join`
+3. **Attribution line**: game mechanics based on the Ravensburger board game; non-commercial student project, not affiliated with Ravensburger.
 
-2. **Button group** (stacked on mobile, side-by-side ≥ sm)
-   - **Create Game** — `bg-blue-600`, `Users` icon left, routes to `/create`
-   - **Join Game** — `bg-gray-700`, `UserPlus` icon left, routes to `/join`
-
-No header or nav bar in v1.
+No header or nav bar.
 
 ---
 
 ### 9.2 Create Game Page (`/create`)
 
-Two sequential phases on the same route, controlled by local component state.
-
-**Phase 1 — Input** (before `POST /api/games`):
-- `ArrowLeft` back link to `/`
-- Heading: "Create Game"
-- Form card (`bg-gray-900 rounded-lg p-6`):
-  - "Your Name" label + text input
-  - "Max Players" label + `<select>` (options 2–6)
-  - **Create Game** button — `bg-blue-600`, full width; calls `POST /api/games`
-
-**Phase 2 — Lobby** (after game created, waiting for players):
-- `ArrowLeft` back link (abandons game, returns to `/`)
-- Heading: "Game Lobby"
-- **Game code card** (`bg-gray-800 rounded-lg`):
-  - Code in large monospace (`font-mono text-2xl tracking-widest`), e.g. `WXYZ12`
-  - Copy button with `Clipboard` icon; swaps to `Check` icon for ~2 s on copy
-- **Player slots list**:
-  - Host row: display name + `Host` badge (`bg-blue-600/20 text-blue-400 text-xs rounded-full`)
-  - Remaining slots: "Waiting for player…" (`text-gray-500`, `border-dashed border-gray-700`)
-  - Each joined player: display name + `Ready` badge
-  - List updated live via WebSocket `GameStateDTO` push
-- **Start Game** button — `bg-green-600`, full width; disabled until ≥ 2 players connected; visible to host only; calls `POST /api/games/{id}/start`
+- Page header "Create Game" with an `ArrowLeft` back button to `/`
+- Form card:
+  - "Your Name" input (max 20 characters)
+  - "Max Players" `<select>`, "2 players" to "6 players", default 4
+  - Error banner for server errors, e.g. a blank name
+  - **Create Game** button: calls `POST /api/games/create`, keeps the returned player id, token and state, and goes to the lobby
 
 ---
 
-### 9.3 Join Game Page (`/join`)
+### 9.3 Join Game Page (`/join`, `/:code`)
 
-- `ArrowLeft` back link to `/`
-- Heading: "Join Game"
-- Form card (`bg-gray-900 rounded-lg p-6`):
-  - "Your Name" label + text input
-  - "Game Code" label + text input (`font-mono text-xl uppercase`, maxlength 6)
-  - Inline error box — `bg-red-900/20 border border-red-700 text-red-400 text-sm rounded` — shown when code is invalid or game is full
-  - **Join Game** button — `bg-blue-600`, full width; calls `POST /api/games/{id}/join`
+- Page header "Join Game" with a back button to `/`
+- Form card:
+  - "Your Name" input (max 20 characters)
+  - "Game Code" input (monospace, uppercase, max 6 characters). A shared link `/<code>` opens this page with the code filled in.
+  - Error banner for server errors, e.g. "Game not found" or "Game is full"
+  - **Join Game** button: calls `POST /api/games/join` and goes to the lobby
 
 ---
 
-### 9.4 Game Board (`/game/:id`)
+### 9.4 Lobby (`/lobby/:id`)
+
+- Page header "Game Lobby"; its back button leaves the game
+- **Join code card**: the 6-character code with a copy button, the join link (`/<code>`) with its own copy button, and a QR code of that link ("Scan to join")
+- **Player list** "Players (n/max)": the host first with a `Host` badge, everyone else with `Ready`, and "Waiting for player…" for each empty slot. The host sees a **Kick** button on every other player.
+- The host gets **Start Game** (`POST /api/games/{id}/start`), disabled with "Need at least 2 players to start" until someone joins. Everyone else sees "Waiting for the host to start the game…".
+- **Leave Game** button
+- Updates arrive on the public topic `/topic/games/{id}`, with a REST re-sync on every reconnect and a 6 s poll. When the game starts everyone moves to the board. A kicked player sees "You were kicked"; if the host leaves, everyone else sees "Game ended" with the reason.
+
+---
+
+### 9.5 Game Board (`/game/:id`)
+
+**Header:** back button, title, your role badge, a centred turn badge ("Your Turn", "Mr X's Turn" or "<name>'s Turn"), a "Double Move — 2nd leg" badge while a double move is pending, and "Round n / 24" with the next reveal round.
 
 **Map panel (MapLibre GL):**
-- Wellington base map (CartoDB Dark NoLabels tiles).
-- `map.json` loaded once on page load. Edge `geometry.coordinates` arrays used directly as polyline paths — one line layer per transport mode, each with a distinct colour (see §8.1). Nodes rendered as circle markers.
-- On a player's turn, their reachable nodes are highlighted (larger radius, bright border). All other nodes are dimmed.
-- Clicking a highlighted node opens the **ticket selector**.
+- CARTO basemap without labels; a Dark / Light / Voyager switch picks the style, and zooming out stops at the Wellington region.
+- Edges are drawn from their `coordinates`, one colour per mode (§8.1). Nodes are circles; players are markers.
+- On your turn your reachable nodes are highlighted. Clicking one opens a popup with a button per transport mode you can pay with.
+- A node search box, a button that centres the map on your node, and a mode legend.
 
-**Ticket selector (modal/popover):**
-- Shows only tickets the player holds that are valid for at least one mode on the chosen edge.
-- Mr X additionally sees DOUBLE (if available) and Invisible (if available).
-- Confirming a selection calls `POST /api/games/{id}/moves`.
+**Side panel:**
+- Players: name, colour and node, with `?` for Mr X when you can't see him. Clicking a node number centres the map on it.
+- Your tickets, with ∞ for Mr X's unlimited ones. Mr X also gets **Use Double Ticket** while he has one left.
+- Mr X log: the ticket used each round, a DOUBLE tag on the first leg of a double (the second leg is labelled like "2b"), and a reveal row with his node on reveal rounds.
+- Reachable nodes: each node you can reach with a chip for every ticket that pays for it, the Invisible ticket included for Mr X.
+- Move: the chosen node and ticket, and **Confirm Move** (`POST /api/games/{id}/moves`). When it isn't your turn this reads "Waiting for other players...".
+- **Leave Game**, which ends the game for everyone.
 
-**Info panel (sidebar):**
-- Current round and whose turn it is.
-- Each player's name, role icon, and remaining ticket counts.
-- Mr X travel log (for detectives: ticket types only; nodeId shown on reveal rounds).
+**Popups:** a blocking card announces your role when the game starts, "Your Turn" when your turn begins, and Mr X's reveal ("You've Been Revealed" for him, "Mr X Revealed" for detectives). If several arrive at once they stack in one card, and one click dismisses them.
 
-**Mr X double-move UX:**
-- After Mr X picks a double move and a ticket for the first leg (sent as `DOUBLE_<ticket>`), the server responds with a state where `mrXDoubleMovePending = true`.
-- The UI shows a "Select your second move" banner and re-highlights reachable nodes from Mr X's new position.
+**Mr X double move:** Mr X presses **Use Double Ticket** and picks the first leg, which is sent as `DOUBLE_<ticket>`. The server answers with `mrXDoubleMovePending = true`, the header shows the 2nd-leg badge, and he picks the second leg from his new node.
 
-**Marker rendering:**
-- Detectives: distinct colour per player (up to 5 colours), always visible to all.
-- Mr X (Mr X's own view): unique marker, always visible to self.
-- Mr X (detective view): marker hidden unless reveal round or game ended.
+**Markers:** every detective has their own colour and is always visible. Mr X always sees his own marker; detectives see it only after his move in a reveal round, until that round ends.
 
 ---
 
-### 9.5 Game Over Page (`/game/:id/end`)
+### 9.6 Game Over Page (`/game/:id/end`)
 
-Layout: vertically centred, full-viewport-height, `bg-gray-950`.
+Layout: vertically centred, full-viewport-height.
 
-Structure (top → bottom, centred):
-
-1. **Trophy icon** — `lucide-vue-next Trophy`, size `w-16 h-16`
-   - Mr X wins: `text-red-500`
-   - Detectives win: `text-blue-500`
-
-2. **Winner banner** — full-width rounded pill
-   - Mr X: "Mr. X Escaped!" on `bg-red-600`
-   - Detectives: "Detectives Win!" on `bg-blue-600`
-
-3. **Summary card** (`bg-gray-900 rounded-lg`) — two-column grid:
-   - Left: "Game Code" label + code value
-   - Right: "Result" label + winner name
-
-4. **Narrative box** (`bg-gray-800 rounded italic text-sm text-gray-300`): one sentence describing how the game ended (e.g. "Mr. X survived all 24 rounds undetected." or "Detective caught Mr. X at round 17.")
-
-5. **Button row** (side-by-side):
-   - **Back to Home** — `bg-gray-800`, routes to `/`
-   - **Play Again** — `bg-blue-600`, routes to `/create`
+1. **Trophy icon** (`Trophy`, 64 px): red when Mr X wins, blue otherwise
+2. **Banner**: "Mr. X Escaped!" on `bg-red-600`, "Detectives Win!" on `bg-blue-600`, or "Game Over" (blue) when the game was aborted
+3. **Summary card**: Game Code, Rounds Played, and Result ("Mr. X wins", "Detectives win" or the abort reason)
+4. **Narrative line**: "Mr. X survived all 24 rounds undetected.", "The detectives caught Mr. X on round 17." (also used when he was boxed in), or the abort reason, e.g. "Alice has left the game"
+5. **Buttons**: **Back to Home** (`/`) and **Play Again** (`/create`)
 
 ---
 
@@ -413,17 +390,11 @@ Structure (top → bottom, centred):
 
 ## 11. API Documentation
 
-The file `documentation/openapi.yaml` is the authoritative OpenAPI 3.1.0 specification for all REST endpoints. It must be kept in sync with the controller implementation at all times.
+`documentation/openapi.yaml` is the authoritative OpenAPI 3.1.0 specification for the REST endpoints and, under `webhooks:`, the STOMP topics. It must be kept in sync with the code at all times.
 
-**Rule for Claude Code**: Whenever a REST endpoint is added, modified, or removed in any Spring controller, update `documentation/openapi.yaml` in the same change. Specifically:
+**Rule (the full version is in `CLAUDE.md`):** any change to the API surface updates `documentation/openapi.yaml` in the same change. That covers adding, removing or renaming an endpoint; changing a request or response shape; a new `GamePhase`, `TurnPhase`, `Role`, `Winner` or `TicketType` value; and any new, changed or removed STOMP topic, frontend subscription, or client-side reaction to a topic. Every change bumps the patch version in `info.version`.
 
-- Add or remove the path entry under `paths:`.
-- Add or remove request body schema(s) under `components/schemas/`.
-- Add or remove response schema(s) and examples.
-- Update enum values if a new `GamePhase`, `TurnPhase`, `Role`, or `TicketType` variant is added.
-- Keep the `version:` field in `info:` bumped (patch for new endpoints, minor for breaking changes).
-
-The file can be viewed locally at [Swagger Editor](https://editor.swagger.io/) by pasting the YAML, or with any OpenAPI-compatible viewer.
+The file can be viewed at [Swagger Editor](https://editor.swagger.io/) by pasting the YAML, or with any OpenAPI-compatible viewer.
 
 ---
 
@@ -432,8 +403,8 @@ The file can be viewed locally at [Swagger Editor](https://editor.swagger.io/) b
 | Requirement | Target |
 |---|---|
 | Map render time (200 nodes / 285 edges) | < 3 s (per MapLibre GL benchmark in `documentation/test_map_api/`) |
-| WebSocket state push latency | < 500 ms from move submission to all clients receiving update |
-| Concurrent games | Multiple simultaneous games supported; per-game `synchronized` lock in game engine |
+| WebSocket state push latency | < 500 ms from move submission to all clients receiving update (measured p95 8.3 ms, max 36.6 ms over 10 concurrent 6-player games; `MultiplayerPerfTest`) |
+| Concurrent games | Multiple simultaneous games supported; per-game `synchronized` lock in `GameService` |
 | Persistence | None in v1 — in-memory only |
 | Browser support | Latest Chrome, Firefox, Safari |
 | Mobile | Not a v1 requirement; desktop-first layout |
