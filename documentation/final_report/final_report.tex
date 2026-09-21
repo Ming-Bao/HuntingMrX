@@ -1,4 +1,4 @@
-%% ENGR489 Final Report -- skeleton (rough sections + bullet points only).
+%% ENGR489 Final Report -- high-level outline for the supervisors: each section lists what it covers.
 %% Preamble and front matter follow engr489_report_template.tex (IEEEtran journal).
 %%
 %% Handbook (Ch. 5): max 14 pages inclusive of references, figures, and tables; do not change
@@ -9,6 +9,9 @@
 %% NZ English, no first person, define acronyms on first use, one to nine in words / 10+ as
 %% numerals, captions end with a full stop (figures below, tables above), every figure and
 %% table referenced in text, IEEE citations.
+%%
+%% Detailed figures (test counts, coverage, latency, SUS scores, graph statistics) are in
+%% documentation/backend-fixes.md, documentation/spec.md and this file's git history.
 
 \documentclass[lettersize,journal]{IEEEtran}
 \usepackage{amsmath,amsfonts}
@@ -38,11 +41,10 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \begin{abstract}
 \begin{itemize}
-	\item Problem: hidden-movement board game limited to co-located play; existing digital versions use fictional boards and no real geography.
-	\item Solution: browser-based, real-time multiplayer game on a 216-node, 372-edge graph of Wellington's bus, train, ferry, and e-scooter network.
-	\item Method: Java/Spring Boot authoritative server, Vue 3 + MapLibre GL client, STOMP over WebSocket, role-filtered state so Mr~X's position is never sent to detectives.
-	\item Evaluation: automated tests (134 backend tests across unit, mock, lifecycle, integration, functional and property-based/fuzz layers, plus an opt-in latency test; 99.2\% line and 97.8\% branch coverage; 100\% mutation score), map-library benchmark, two user-testing rounds, System Usability Scale (SUS) questionnaire (overall 72.5, n = 7, against the 68 average benchmark).
-	\item Outcome: deployed, playable system suitable for Open Day demonstration.
+	\item Problem: hidden-movement board games need everyone in the same room, and existing digital versions use fictional boards.
+	\item Solution: a browser-based, real-time multiplayer game played on a map of Wellington's real transport network.
+	\item Evaluation: automated testing, a map-library benchmark, and two rounds of user testing with a usability questionnaire.
+	\item Outcome: a deployed, playable system suitable for the university Open Day.
 \end{itemize}
 \end{abstract}
 
@@ -53,179 +55,137 @@ Multiplayer game, hidden movement, real-time web application, WebSocket, map ove
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Introduction} % ~1.5 pages
 \begin{itemize}
-	\item Motivation: board games tied to physical components and co-location; hidden-movement deduction games translate well to networked play because the server can enforce secrecy.
-	\item Gap: existing digital versions replicate the original board; no browser-based version on a real city map with real transport modes.
-	\item Secondary goal: showpiece for university Open Day (visually compelling, robust enough for a general audience).
-	\item Aim and quantifiable goals (state early, refer back in Evaluation):
-	\begin{itemize}
-		\item Automatic rule enforcement (movement, tickets, reveal rounds, double move, win conditions, 24 rounds).
-		\item Map render time under 3 s for roughly 200 nodes / 285 edges (spec target).
-		\item State push under 500 ms from move submission to all clients (spec target).
-		\item Multiple concurrent games; disconnect handling with a grace period.
-		\item Usability: SUS above the 68 benchmark.
-	\end{itemize}
-	\item Contributions: static pre-computed Wellington graph and map-creation tooling; role-filtered real-time architecture; evaluation combining benchmarks, automated tests, and user testing.
-	\item Naming: game mechanics based on the Ravensburger board game, used with permission for non-commercial academic purposes; the project was proposed under a working title and renamed, so the original brand name is not used.
-	\item Key findings (one line each, from Evaluation).
-	\item Report roadmap (one sentence per section).
+	\item Motivation: why hidden-movement games suit online play, and the gap this project fills (no browser version on a real city map).
+	\item Secondary goal: a showpiece for the university Open Day.
+	\item Aims and measurable goals, which the Evaluation section refers back to.
+	\item Contributions, and a note on naming: the mechanics are used with the publisher's permission, and the original brand name is not used.
+	\item Key findings and a roadmap of the report.
 \end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Related Work} % ~1.5 pages
 \begin{itemize}
-	\item Game rules being implemented: hidden movement, transport tickets, reveal rounds, double-move and invisible tickets (cite the Ravensburger rulebook).
-	\item Existing digital versions (Board Game Arena, Steam ports): strong rules, fictional map, no real geography. Find and cite specifics; the progress-presentation table is a starting point.
-	\item Location-based games (Pok\'emon GO and similar): real geography but shallow strategy; comparison table (real map / browser / strategic depth / real-time multiplayer).
-	\item Hidden-information multiplayer design: authoritative server, never sending secret state to clients (cheat resistance); cite a game-networking source.
-	\item Map libraries: Google Maps, Leaflet, MapLibre GL. Cite documentation and licences \cite{placeholder_web}.
-	\item Routing approach: routing Application Programming Interfaces (APIs) (per-request cost and latency) versus pre-computed GeoJSON; OpenStreetMap as data source (cite licence/attribution).
-	\item Real-time web transport: WebSocket, Simple Text Oriented Messaging Protocol (STOMP), SockJS fallback versus polling or server-sent events.
-	\item Usability evaluation: SUS (Brooke; Sauro's 68 average benchmark).
-	\item Critical analysis: strengths, weaknesses, and gaps of each; close with how this project addresses the gap.
+	\item The original board game and existing digital versions of it.
+	\item Location-based games that use real-world maps.
+	\item Keeping hidden information secret in online multiplayer games.
+	\item Map libraries, and live routing services versus pre-computed routes \cite{placeholder_web}.
+	\item Real-time communication for web applications.
+	\item Measuring usability with the System Usability Scale (SUS).
+	\item How this project addresses the gaps these leave.
 \end{itemize}
+% Citations still to find: the Ravensburger rulebook; specific digital versions (the progress-presentation
+% table is a starting point); a game-networking source; map-library docs and licences; the OpenStreetMap
+% licence; Brooke (SUS) and Sauro (the 68 benchmark).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Requirements and Constraints} % ~1 page
 \begin{itemize}
-	\item Functional requirements (from \texttt{documentation/spec.md}): roles (1 Mr~X, 1--5 detectives), four transport modes, ticket allocation, turn order, reveal rounds, double move, Invisible ticket, win conditions, movement constraints.
-	\item Non-functional requirements: latency, render time, concurrency, browser support (latest Chrome/Firefox/Safari), desktop-first.
-	\item Constraints: no per-request paid APIs; in-memory only (no database); solo project over 24 weeks; budget \$294 (from proposal); self-hosted deployment.
-	\item Table: requirement, measure, target, where evaluated (traceability from requirements to the Evaluation section).
+	\item Functional requirements: the game rules the system has to enforce.
+	\item Non-functional requirements: responsiveness, several games at once, and browser support.
+	\item Constraints: no paid per-request services, no database, a solo project on a small budget, and self-hosting.
+	\item A table linking each requirement to where it is evaluated.
 \end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Design} % ~3 pages
 \subsection{Architecture}
 \begin{itemize}
-	\item Client--server, authoritative server; figure: browser (Vue + Pinia + MapLibre) / REST / STOMP / Spring Boot / in-memory \texttt{ConcurrentHashMap}.
-	\item Why REST for actions and WebSocket for push only (simpler auth and error handling).
-	\item Alternatives considered and rejected: peer-to-peer, polling, database-backed sessions, Node backend (Java vs JavaScript from the proposal); trade-off for each.
+	\item A client-server design in which the server is the single source of truth.
+	\item The alternatives considered and why they were not chosen.
 \end{itemize}
 \subsection{Game State Machine and Turn Flow}
 \begin{itemize}
-	\item Phases: Lobby, InProgress (MrXTurn, DetectiveTurn, RoundEnd), ended states (detectives win, Mr~X wins, aborted); the lobby closes if the host leaves (figure from \texttt{plans/states-diagrams.md}).
-	\item Every operation validated against phase (e.g.\ start only in lobby, kick only in lobby).
-	\item Leaving and idling: any player leaving a game in progress aborts it, and the server aborts a game after 15 minutes without a move. Pause-on-disconnect with a 60 s grace period was planned but dropped: user-testing networks dropped WebSockets often, so clients reconnect and re-sync over REST instead of the server pausing.
+	\item How a game moves from the lobby through play to its end.
+	\item What happens when a player leaves or stops responding.
 \end{itemize}
 \subsection{Domain Model}
 \begin{itemize}
-	\item Player model: one \texttt{Player} class whose role is assigned at start; every rule lives in a plain \texttt{Game} class with no Spring, which made the rules directly unit-testable (the earlier lobby/Mr~X/detective class hierarchy and abstract player were collapsed in the backend rewrite).
-	\item Ticket model: unlimited regular tickets for Mr~X, finite Invisible and Double; fixed budgets for detectives.
-	\item Class diagram (from \texttt{plans/classdiagram.md}).
+	\item How players, tickets and rules are modelled, with the rules kept apart from the web framework so they can be tested directly.
 \end{itemize}
 \subsection{Hidden Information and Role-Filtered State}
 \begin{itemize}
-	\item Each player receives a filtered snapshot; Mr~X's node omitted on non-reveal rounds, reveal appears in log.
-	\item Per-player topics rather than one shared topic (explain why).
-	\item Sequence diagram of a move: submit, validate, apply, catch check, broadcast per-player views.
+	\item How each player is sent only what they are allowed to see, so Mr~X's position stays secret.
 \end{itemize}
 \subsection{Map Data Design}
 \begin{itemize}
-	\item Decision: static graph JSON with inline GeoJSON geometry versus live routing APIs (cost, latency, hundreds of edges).
-	\item Node and edge format, undirected edges, mode arrays; graph density and balance between the four modes.
-	\item Library selection: benchmark methodology and results (see Evaluation).
+	\item Why the Wellington map is a pre-computed graph rather than live routing.
+	\item How the map library was chosen.
 \end{itemize}
 \subsection{User Interface Design}
 \begin{itemize}
-	\item Screens: landing, create, join, lobby, game board, end screen; dark theme, mode colours, ticket selector, info panel, Mr~X log with reveal rows.
-	\item Design decisions tied to feedback (see Evaluation): transport-mode popups, viewport-relative layout, centred turn indicator.
-	\item Mockups or Figma reference (if used).
+	\item The main screens, and the changes made in response to user feedback.
 \end{itemize}
+% Add mockups or the Figma reference here, if used.
 \subsection{Real-World Issues}
 \begin{itemize}
-	\item Ethics: voluntary student participants, course coordinator approval; vouchers for participants (check the ethics wording).
-	\item Sustainability: no per-request cloud calls, minimal self-hosted infrastructure.
-	\item Safety and IP: no location tracking of real players; Ravensburger permission; open-source licences (GPL-3.0 for repo; map data attribution).
-	\item Privacy: what is stored (in memory only), no accounts.
+	\item Ethics, sustainability, safety, intellectual property and privacy.
 \end{itemize}
+% Check the ethics wording (voluntary student participants, course coordinator approval, vouchers).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Implementation} % ~3 pages
 \begin{itemize}
-	\item Technology table with justification: Java 21, Spring Boot 4.0.6 (\texttt{spec.md} says 3, verify), Maven; Vue 3, Pinia, Vue Router, TypeScript, Vite, Tailwind CSS 4; MapLibre GL 4; \texttt{@stomp/stompjs} and SockJS; Docker, nginx, supervisord, Cloudflare Tunnel.
-	\item Backend structure: controllers (\texttt{GameController}, \texttt{MapController}, \texttt{ApiExceptionHandler}), \texttt{GameService}, \texttt{MapGraph}, models, records for Data Transfer Objects (DTOs) (about 1,200 lines of Java after simplification pass).
-	\item Move validation: edge lookup, ticket check, occupied-node rule, catch detection, auto-skip of stuck detectives; per-game locking for concurrency.
-	\item Reveal rounds (2, 8, 13, 18, 24) implemented once in the backend and mirrored in a frontend utility.
-	\item Double move and Invisible ticket handling; log entries for each leg.
-	\item Configuration properties: grace period, turn timer, detective ticket budgets (12 e-scooter / 8 bus / 6 train / 2 ferry).
-	\item Frontend: Pinia store as single source of truth, STOMP subscriptions, REST fallback with polling for reconnect (6 s), MapLibre layers per mode, reachable-node highlighting, node popups.
-	\item Map creation: \texttt{mapCreator} tool (browser tool + headless generator/evaluator); building from bus and train networks first, then e-scooter edges; problems: fully connected graphs, awkward road geometry, hard to create three-colour side-by-side edges (from notes).
-	\item Final graph statistics: 216 nodes, 372 edges (323 e-scooter, 257 bus, 9 train, 2 ferry edge-mode incidences).
-	\item Deployment: single Docker image (nginx + Spring Boot under supervisord), \texttt{BASE\_PATH} support, update script, Cloudflare Tunnel on a home server; live at the deployed domain.
-	\item API documentation: OpenAPI spec (currently 0.1.11) kept in sync with REST and STOMP topics, enforced in the workflow.
-	\item Development process: iterative sprints; use of AI-assisted development (Claude Code) under review and ownership; describe what it was used for and how output was verified. Check how the course expects AI use to be disclosed.
-	\item Figures: screenshots of lobby, board, ticket selector, log, end screen.
+	\item Technology choices and the reasons for them.
+	\item How the server enforces the rules and runs several games at once.
+	\item How the browser client shows the map, the game state and live updates.
+	\item Building the Wellington map, the tooling made for it, and the problems met along the way.
+	\item Deployment, and keeping the API documentation in step with the code.
+	\item The development process, including how AI-assisted development was used and checked.
+	\item Screenshots of the main screens.
 \end{itemize}
+% Check how the course expects AI use to be disclosed.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Evaluation} % ~3.5 pages
 \subsection{Map Library Benchmark}
 \begin{itemize}
-	\item Method: Selenium + Firefox, 10 runs each, baseline and stress scenarios (\texttt{time\_maps.py}, \texttt{scenarios.json}).
-	\item Results table (mean, s): baseline Google 0.70 / Leaflet 0.23 / MapLibre 0.40; stress 2.69 / 2.21 / 2.31.
-	\item Discussion: Leaflet fastest but MapLibre gives WebGL and lowest variance in stress; Google needs a key and cost; MapLibre chosen. Note that the benchmark measured empty-map and synthetic load, not the final graph.
-	\item Threats: single browser, single machine, small run count.
+	\item How three map libraries were compared, the results, and the limits of the benchmark.
 \end{itemize}
 \subsection{Functional Correctness}
 \begin{itemize}
-	\item Test suite: 134 backend tests: unit (82: \texttt{MapGraph}, \texttt{Player}, \texttt{Game} on hand-drawn boards), mock (17: \texttt{GameService} with mocked messaging), lifecycle (8 scripted complete games), integration (19: HTTP via MockMvc, STOMP with real clients), functional (4: full games over HTTP and STOMP), property-based and fuzz (4, JUnit with seeded random), and performance (1, opt-in); mapped to the proposal's plan.
-	\item Table of layers, counts and what each catches (counts and results in \texttt{documentation/backend-fixes.md}).
-	\item Targeted tests: every bug found in the backend review has a regression test (\texttt{documentation/backend-fixes.md}), e.g.\ Mr~X boxed in, chained double moves, hidden position not leaked over REST or STOMP.
-	\item Full-game end-to-end test through the real server with an HTTP and a STOMP client for every player (it replaced a Selenium test that only used the browser as an HTTP client and was flaky).
-	\item Meta-testing: JaCoCo coverage 99.2\% lines and 97.8\% branches overall (game and service: 99.7\% and 97.7\%); PIT mutation score 100\% (201 of 201 mutants killed) on game and service, after the first run's survivors exposed seven missing tests; property-based tests over 300 seeded random games (every rule holds and every game ends) and fuzz tests (garbage moves, names and request bodies never cause a server error). Frontend has no automated tests.
+	\item The layers of automated tests and what each one checks.
+	\item Regression tests for the bugs found in the backend review.
+	\item Coverage, mutation and property-based testing as checks on the tests themselves.
 \end{itemize}
 \subsection{Performance and Multiplayer Synchronisation}
 \begin{itemize}
-	\item Targets: 500 ms push latency, 3 s map render, concurrent games.
-	\item Latency harness (\texttt{MultiplayerPerfTest}): 10 concurrent games of 6 players on the real map (987 moves); move submitted to every other player updated p50 4.6 ms, p95 8.3 ms, max 36.6 ms, against the 500 ms target. A render-time measurement with the real map is still to do.
-	\item Report percentile latencies as a figure/table; compare against targets.
+	\item Update latency and map rendering, measured against the targets from the Introduction.
 \end{itemize}
+% To do: measure map render time on the real map.
 \subsection{User Evaluation}
 \begin{itemize}
-	\item Participants: seven players (six detectives, one Mr~X), games of four to six players; voluntary, ethics approved, voucher incentive.
-	\item Instrument: SUS plus free-text comments and role / player count / perceived side balance.
-	\item Results table: Mr~X 70.0 (n = 1), detectives 72.9 (n = 6), overall 72.5 (n = 7); above the 68 benchmark; range 60--95.
-	\item Qualitative themes: onboarding and tutorial demand (three responses), Mr~X log hard to read at first, reachable-node scaling on small screens, praise for fun and replayability, request for custom lobby rules.
-	\item Iteration evidence: test round one (seven issues) and round two (four issues) mapped to the fixes (name limit, zoom limit, tall log, node popups, final-state view, colour diversity, selection highlight bug, centred turn indicator, reveal rows in log, unabbreviated rounds).
-	\item Limitations: small n, one Mr~X respondent, convenience sample of students, SUS tested after fixes were partly applied. Possibly add before/after comparison if a third round is run.
-	\item Side balance: column ``which side felt stronger'' was answered 2 by everyone; decide how to interpret and report (check the form's scale).
+	\item Two rounds of user testing and the SUS questionnaire.
+	\item The main themes in the feedback and the changes they led to.
+	\item Limitations of the study.
 \end{itemize}
+% Possibly a before/after comparison if a third round is run. Decide how to read the side-balance
+% question (check the form's scale).
 \subsection{Requirements Traceability}
 \begin{itemize}
-	\item Table mapping each goal from the Introduction to evidence and a met / partly met / not met verdict.
+	\item Each goal from the Introduction marked as met, partly met or not met.
 \end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Discussion} % ~0.5 page
 \begin{itemize}
-	\item What worked: pre-computed graph, authoritative server with filtered views, simplification refactor (about 287 lines removed with all tests green); the backend rewrite into a plain rules core plus a thin Spring service (rules directly unit-testable, eight bugs fixed with regression tests).
-	\item What was hard: map creation effort, disconnect and reconnect behaviour, in-memory state means a restart ends all games.
-	\item Security lesson: role filtering was bypassable, because public player IDs doubled as credentials and the in-memory STOMP broker honoured wildcard subscriptions and client SENDs; fixed with secret tokens, exact-match subscriptions and dropping client SEND frames.
-	\item Trade-offs revisited: no accounts (per-player secret tokens instead), no database, desktop-first layout.
-	\item Threats to validity: small sample, no automated frontend tests, benchmark scope.
+	\item What worked well and what was hard.
+	\item Lessons learned, including a security weakness found in review and how it was fixed.
+	\item Trade-offs revisited, and threats to validity.
 \end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Conclusions and Future Work} % ~0.5 page
 \begin{itemize}
-	\item Conclusion: restate aim, what was delivered, key evaluation results.
-	\item Future work framed for a next ENGR489 student:
-	\begin{itemize}
-		\item In-game tutorial / onboarding (top user request).
-		\item Configurable lobbies and rule variants.
-		\item Persistence (database) and reconnect across restarts; accounts.
-		\item Mobile layout and touch interaction.
-		\item Automated map generation from open data.
-		\item Statistical balance analysis using automated bot players (Mr~X versus detective win rates).
-		\item Larger user study, including more Mr~X players.
-	\end{itemize}
+	\item What was delivered and the main results.
+	\item Future work for a following student: a tutorial, configurable lobbies, saved games and accounts, mobile support, automated map generation, balance testing with bot players, and a larger user study.
 \end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section*{Acknowledgments}
 \begin{itemize}
-	\item Supervisors; course coordinator (ethics approval); user-testing participants; the friend or teammate who helped with the map, if any.
+	\item Supervisors, the course coordinator and the user-testing participants.
 \end{itemize}
+% Add the friend or teammate who helped with the map, if any.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Appendix (repository link, openapi.yaml, full spec, diagrams, anonymised SUS responses --
