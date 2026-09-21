@@ -1,313 +1,143 @@
 package com.huntingmrxwellington.service;
 
-import com.huntingmrxwellington.dto.GameState;
 import com.huntingmrxwellington.exception.GameNotFoundException;
-import com.huntingmrxwellington.model.*;
+import com.huntingmrxwellington.game.GamePhase;
+import com.huntingmrxwellington.game.GameState;
+import com.huntingmrxwellington.game.PlayerView;
+import com.huntingmrxwellington.game.TestMaps;
+import com.huntingmrxwellington.game.Winner;
+import com.huntingmrxwellington.service.GameService.JoinResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
-/**
- * Lifecycle tests for GameService's own in-memory session storage.
- * Tests the full game flow: create → join → start → leave/end.
- */
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.verify;
+
+/** Complete games through GameService, one for each way a game can end. With NO_SHUFFLE the host
+ *  is Mr X on node 1 and each later joiner a detective on node 2, 3, ... of TestMaps.small(). */
+@ExtendWith(MockitoExtension.class)
 class GameLifecycleTest {
 
-    private GameService gameService;
+    @Mock SimpMessagingTemplate messaging;
+    Instant now = Instant.parse("2026-01-01T00:00:00Z");
+    GameService service;
+    String gameId;
+    List<JoinResponse> players;   // join order; players.get(0) is Mr X
 
     @BeforeEach
     void setUp() {
-        SimpMessagingTemplate messaging = mock(SimpMessagingTemplate.class);
-        MapGraph mapGraph = mock(MapGraph.class);
-        when(mapGraph.randomNodes(anyInt(), any())).thenAnswer(inv -> {
-            int count = inv.getArgument(0);
-            List<Integer> ids = new ArrayList<>();
-            for (int i = 1; i <= count; i++) ids.add(i);
-            return ids;
-        });
-        when(mapGraph.validMoves(anyInt(), any(), anyBoolean(), anyBoolean(), any()))
-                .thenReturn(List.of());
-        gameService = new GameService(messaging, mapGraph);
-        ReflectionTestUtils.setField(gameService, "escooterTickets", 10);
-        ReflectionTestUtils.setField(gameService, "busTickets", 8);
-        ReflectionTestUtils.setField(gameService, "trainTickets", 4);
-        ReflectionTestUtils.setField(gameService, "ferryTickets", 2);
+        service = new GameService(messaging, TestMaps.small(), ServiceFixtures.SETTINGS,
+                ServiceFixtures.NO_SHUFFLE, () -> now);
     }
 
-    // -------------------------------------------------------------------------
-    // Create → join → start
-    // -------------------------------------------------------------------------
+    void startGame(int playerCount) {
+        JoinResponse host = service.createGame("Mr X", playerCount);
+        gameId = host.gameState().gameId();
+        players = new ArrayList<>(List.of(host));
+        for (int i = 1; i < playerCount; i++)
+            players.add(service.joinGame(host.gameState().joinCode(), "Det" + i));
+        service.startGame(gameId, host.playerToken());
+    }
 
-    @Test
-    void fullLobbyFlow_twoPlayers_startAssignsRoles() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        String gameId = created.gameState().gameId();
-        String hostId = created.playerId();
+    GameState move(int player, int to, String ticket) {
+        return service.submitMove(gameId, players.get(player).playerToken(), to, ticket);
+    }
 
-        gameService.joinGame(created.gameState().joinCode(), "Bob");
-
-        GameState started = gameService.startGame(gameId, hostId);
-
-        assertThat(started.phase()).isEqualTo(GamePhase.IN_PROGRESS);
-        assertThat(started.players()).hasSize(2);
-        assertThat(started.players()).allMatch(p -> p.role() != null);
-        assertThat(started.players()).allMatch(p -> p.tickets() != null);
-        long mrXCount = started.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).count();
-        assertThat(mrXCount).isEqualTo(1);
+    GameState state() {
+        return service.getGame(gameId, null);
     }
 
     @Test
-    void fullLobbyFlow_maxPlayers_allGetRoles() {
-        GameService.CreateResult created = gameService.createGame("Host", 6);
-        String gameId = created.gameState().gameId();
-        String code = created.gameState().joinCode();
+    void theDetectivesCatchMrX() {
+        startGame(2);                          // Mr X on 1, detective on 2
+        move(0, 5, "FERRY");
+        move(1, 3, "ESCOOTER");
+        move(0, 4, "BUS");                     // round 2: Mr X steps next to the detective
+        GameState end = move(1, 4, "TRAIN");
+        assertThat(end.phase()).isEqualTo(GamePhase.ENDED);
+        assertThat(end.winner()).isEqualTo(Winner.DETECTIVES);
+    }
 
-        for (int i = 1; i <= 5; i++) {
-            gameService.joinGame(code, "Player" + i);
+    @Test
+    void mrXBoxedInLoses() {   // B1
+        startGame(3);                          // Mr X on 1, detectives on 2 and 3
+        move(0, 5, "FERRY");
+        move(1, 1, "BUS");
+        GameState end = move(2, 4, "TRAIN");   // both of Mr X's exits (1 and 4) are now held
+        assertThat(end.winner()).isEqualTo(Winner.DETECTIVES);
+        assertThat(end.round()).isEqualTo(2);
+    }
+
+    @Test
+    void mrXSurvivesAllTwentyFourRounds() {
+        startGame(2);                          // Mr X shuttles 1 <-> 5 by ferry, the detective 2 <-> 6 by bus
+        for (int round = 1; round <= 24; round++) {
+            move(0, round % 2 == 1 ? 5 : 1, "FERRY");
+            move(1, round % 2 == 1 ? 6 : 2, "BUS");
         }
-
-        GameState started = gameService.startGame(gameId, created.playerId());
-        assertThat(started.players()).hasSize(6);
-        assertThat(started.players()).allMatch(p -> p.role() != null);
-        long mrXCount = started.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).count();
-        assertThat(mrXCount).isEqualTo(1);
-
-        // Mr X should have 5 BLACK tickets (one per detective)
-        var mrX = started.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow();
-        assertThat(mrX.tickets().get(TicketType.BLACK)).isEqualTo(5);
+        assertThat(state().winner()).isEqualTo(Winner.MR_X);
+        assertThat(state().mrXLog()).hasSize(24);
     }
 
     @Test
-    void joinCode_isUppercaseAlphanumericSixChars() {
-        GameService.CreateResult result = gameService.createGame("Alice", 3);
-        String code = result.gameState().joinCode();
-        assertThat(code).matches("[A-Z0-9]{6}");
+    void aPlayerLeavingEndsTheGameForEveryone() {   // B3
+        startGame(3);
+        move(0, 5, "FERRY");                   // detective 1's turn
+        clearInvocations(messaging);
+        service.removePlayer(gameId, players.get(1).playerToken(), players.get(1).playerId());
+        GameState forMrX = service.getGame(gameId, players.get(0).playerToken());
+        assertThat(forMrX.phase()).isEqualTo(GamePhase.ENDED);
+        assertThat(forMrX.abortReason()).isEqualTo("Det1 has left the game");
+        verify(messaging).convertAndSend(eq("/topic/games/" + gameId + "/players/" + players.get(2).playerToken()),
+                any(Object.class));
     }
 
     @Test
-    void joinCode_uniqueAcrossGames() {
-        String code1 = gameService.createGame("Alice", 3).gameState().joinCode();
-        String code2 = gameService.createGame("Bob", 3).gameState().joinCode();
-        // Not guaranteed but extremely unlikely to collide — tests determinism
-        // of state rather than randomness; check both are valid format
-        assertThat(code1).matches("[A-Z0-9]{6}");
-        assertThat(code2).matches("[A-Z0-9]{6}");
+    void theHostLeavingTheLobbyClosesItForEveryone() {   // B6
+        JoinResponse host = service.createGame("Host", 4);
+        JoinResponse guest = service.joinGame(host.gameState().joinCode(), "Guest");
+        String id = host.gameState().gameId();
+        service.removePlayer(id, host.playerToken(), host.playerId());
+        GameState forGuest = service.getGame(id, guest.playerToken());
+        assertThat(forGuest.phase()).isEqualTo(GamePhase.ENDED);
+        assertThat(forGuest.abortReason()).isEqualTo("The host left the game");
     }
 
     @Test
-    void getGame_afterJoin_reflectsNewPlayer() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        String gameId = created.gameState().gameId();
-        String code = created.gameState().joinCode();
-
-        gameService.joinGame(code, "Bob");
-
-        GameState state = gameService.getGame(gameId);
-        assertThat(state.players()).hasSize(2);
-        assertThat(state.players()).anyMatch(p -> "Bob".equals(p.name()));
-    }
-
-    // -------------------------------------------------------------------------
-    // Leave — lobby phase
-    // -------------------------------------------------------------------------
-
-    @Test
-    void leaveGame_hostLeavesLobby_gameDeleted() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        String gameId = created.gameState().gameId();
-
-        gameService.leaveGame(gameId, created.playerId());
-
-        assertThatThrownBy(() -> gameService.getGame(gameId))
-                .isInstanceOf(GameNotFoundException.class)
-                .hasMessageContaining("not found");
+    void theLastPlayerLeavingDeletesTheGame() {
+        JoinResponse host = service.createGame("Host", 4);
+        String id = host.gameState().gameId();
+        service.removePlayer(id, host.playerToken(), host.playerId());
+        assertThatThrownBy(() -> service.getGame(id, null)).isInstanceOf(GameNotFoundException.class);
     }
 
     @Test
-    void leaveGame_joinerLeavesLobby_hostStillInGame() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        String gameId = created.gameState().gameId();
-        GameService.JoinResult joined = gameService.joinGame(created.gameState().joinCode(), "Bob");
-
-        gameService.leaveGame(gameId, joined.playerId());
-
-        GameState state = gameService.getGame(gameId);
-        assertThat(state.players()).hasSize(1);
-        assertThat(state.players().get(0).name()).isEqualTo("Alice");
-    }
-
-    // -------------------------------------------------------------------------
-    // Leave — in-progress phase
-    // -------------------------------------------------------------------------
-
-    @Test
-    void leaveGame_mrXLeavesInProgress_gameEnds() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        String gameId = created.gameState().gameId();
-        gameService.joinGame(created.gameState().joinCode(), "Bob");
-        GameState started = gameService.startGame(gameId, created.playerId());
-
-        String mrXId = started.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role()))
-                .findFirst().orElseThrow().id();
-
-        gameService.leaveGame(gameId, mrXId);
-
-        GameState state = gameService.getGame(gameId);
-        assertThat(state.phase()).isEqualTo(GamePhase.ENDED);
-        assertThat(state.abortReason()).isNotBlank();
+    void aKickedPlayersPollShowsThemGone() {
+        JoinResponse host = service.createGame("Host", 4);
+        JoinResponse guest = service.joinGame(host.gameState().joinCode(), "Guest");
+        String id = host.gameState().gameId();
+        service.removePlayer(id, host.playerToken(), guest.playerId());
+        GameState forGuest = service.getGame(id, guest.playerToken());   // token no longer valid: public view
+        assertThat(forGuest.players()).extracting(PlayerView::id).doesNotContain(guest.playerId());
     }
 
     @Test
-    void leaveGame_detectiveLeavesInProgress_gameStillRunning() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        String gameId = created.gameState().gameId();
-        gameService.joinGame(created.gameState().joinCode(), "Bob");
-        GameState started = gameService.startGame(gameId, created.playerId());
-
-        String detectiveId = started.players().stream()
-                .filter(p -> Role.DETECTIVE.equals(p.role()))
-                .findFirst().orElseThrow().id();
-
-        gameService.leaveGame(gameId, detectiveId);
-
-        GameState state = gameService.getGame(gameId);
-        assertThat(state.phase()).isEqualTo(GamePhase.IN_PROGRESS);
-        assertThat(state.players()).hasSize(1);
-    }
-
-    // -------------------------------------------------------------------------
-    // Start — detailed invariants
-    // -------------------------------------------------------------------------
-
-    @Test
-    void startGame_currentPlayerIdIsMrX() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        String gameId = created.gameState().gameId();
-        gameService.joinGame(created.gameState().joinCode(), "Bob");
-
-        GameState started = gameService.startGame(gameId, created.playerId());
-
-        String mrXId = started.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow().id();
-        assertThat(started.currentPlayerId())
-                .as("game engine reads currentPlayerId to determine whose turn it is")
-                .isEqualTo(mrXId);
-    }
-
-    @Test
-    void startGame_mrXDoubleTicketsIsTwo() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        gameService.joinGame(created.gameState().joinCode(), "Bob");
-        GameState started = gameService.startGame(created.gameState().gameId(), created.playerId());
-
-        var mrX = started.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow();
-        assertThat(mrX.tickets().get(TicketType.DOUBLE)).isEqualTo(2);
-    }
-
-    @Test
-    void startGame_twoPlayers_mrXBlackIsOne() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        gameService.joinGame(created.gameState().joinCode(), "Bob");
-        GameState started = gameService.startGame(created.gameState().gameId(), created.playerId());
-
-        var mrX = started.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow();
-        assertThat(mrX.tickets().get(TicketType.BLACK))
-                .as("2 players means 1 detective, so Mr X gets exactly 1 BLACK ticket")
-                .isEqualTo(1);
-    }
-
-    @Test
-    void startGame_detectivesHaveNoBlackOrDoubleTickets() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        gameService.joinGame(created.gameState().joinCode(), "Bob");
-        GameState started = gameService.startGame(created.gameState().gameId(), created.playerId());
-
-        started.players().stream()
-                .filter(p -> Role.DETECTIVE.equals(p.role()))
-                .forEach(d -> {
-                    assertThat(d.tickets()).doesNotContainKey(TicketType.BLACK);
-                    assertThat(d.tickets()).doesNotContainKey(TicketType.DOUBLE);
-                });
-    }
-
-    @Test
-    void joinGame_lowercaseCode_accepted() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        String lowerCode = created.gameState().joinCode().toLowerCase();
-
-        assertThatCode(() -> gameService.joinGame(lowerCode, "Bob")).doesNotThrowAnyException();
-
-        GameState state = gameService.getGame(created.gameState().gameId());
-        assertThat(state.players()).hasSize(2);
-    }
-
-    // -------------------------------------------------------------------------
-    // Leave — in-progress, player identity
-    // -------------------------------------------------------------------------
-
-    @Test
-    void leaveGame_detectiveLeaves_correctPlayerRemovedNotOther() {
-        GameService.CreateResult created = gameService.createGame("Alice", 4);
-        String gameId = created.gameState().gameId();
-        gameService.joinGame(created.gameState().joinCode(), "Bob");
-        GameState started = gameService.startGame(gameId, created.playerId());
-
-        String detectiveId = started.players().stream()
-                .filter(p -> Role.DETECTIVE.equals(p.role())).findFirst().orElseThrow().id();
-        String mrXId = started.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow().id();
-
-        gameService.leaveGame(gameId, detectiveId);
-
-        GameState state = gameService.getGame(gameId);
-        assertThat(state.players()).hasSize(1);
-        assertThat(state.players().get(0).id())
-                .as("MrX must remain; only the specific detective who left is gone")
-                .isEqualTo(mrXId);
-    }
-
-    // -------------------------------------------------------------------------
-    // Kick — lobby phase
-    // -------------------------------------------------------------------------
-
-    @Test
-    void kickPlayer_fullFlow_kickedPlayerGone() {
-        GameService.CreateResult created = gameService.createGame("Host", 4);
-        String gameId = created.gameState().gameId();
-        GameService.JoinResult joined = gameService.joinGame(created.gameState().joinCode(), "Bob");
-
-        gameService.kickPlayer(gameId, created.playerId(), joined.playerId());
-
-        GameState state = gameService.getGame(gameId);
-        assertThat(state.players()).hasSize(1);
-        assertThat(state.players()).noneMatch(p -> "Bob".equals(p.name()));
-    }
-
-    @Test
-    void kickPlayer_thenJoinAgain_newPlayerAdded() {
-        GameService.CreateResult created = gameService.createGame("Host", 4);
-        String gameId = created.gameState().gameId();
-        GameService.JoinResult joined = gameService.joinGame(created.gameState().joinCode(), "Bob");
-
-        gameService.kickPlayer(gameId, created.playerId(), joined.playerId());
-        gameService.joinGame(created.gameState().joinCode(), "Charlie");
-
-        GameState state = gameService.getGame(gameId);
-        assertThat(state.players()).hasSize(2);
-        assertThat(state.players()).anyMatch(p -> "Charlie".equals(p.name()));
+    void anIdleGameIsAbortedByTheSweep() {
+        startGame(2);
+        now = now.plusSeconds(901);
+        service.abortIdleGames();
+        assertThat(state().phase()).isEqualTo(GamePhase.ENDED);
+        assertThat(state().abortReason()).isEqualTo("A player exceeded the 15-minute turn limit");
     }
 }

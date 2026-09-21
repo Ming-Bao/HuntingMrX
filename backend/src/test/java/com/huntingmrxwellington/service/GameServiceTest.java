@@ -1,594 +1,230 @@
 package com.huntingmrxwellington.service;
 
-import com.huntingmrxwellington.dto.GameState;
 import com.huntingmrxwellington.exception.ConflictException;
 import com.huntingmrxwellington.exception.ForbiddenException;
 import com.huntingmrxwellington.exception.GameNotFoundException;
-import com.huntingmrxwellington.model.*;
+import com.huntingmrxwellington.game.GamePhase;
+import com.huntingmrxwellington.game.GameState;
+import com.huntingmrxwellington.game.PlayerView;
+import com.huntingmrxwellington.game.Role;
+import com.huntingmrxwellington.game.TestMaps;
+import com.huntingmrxwellington.service.GameService.JoinResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+/** GameService with a real game and board and a mocked messaging template: what gets
+ *  published where, token handling, and locking. */
 @ExtendWith(MockitoExtension.class)
 class GameServiceTest {
 
     @Mock SimpMessagingTemplate messaging;
-    @Mock MapGraph mapGraph;
-
-    @InjectMocks GameService gameService;
+    Instant now = Instant.parse("2026-01-01T00:00:00Z");
+    GameService service;
 
     @BeforeEach
-    void injectTicketConfig() {
-        ReflectionTestUtils.setField(gameService, "escooterTickets", 10);
-        ReflectionTestUtils.setField(gameService, "busTickets", 8);
-        ReflectionTestUtils.setField(gameService, "trainTickets", 4);
-        ReflectionTestUtils.setField(gameService, "ferryTickets", 2);
-        // Lenient: only some tests exercise the graph (startGame / moves)
-        lenient().when(mapGraph.randomNodes(anyInt(), any())).thenAnswer(inv -> {
-            int count = inv.getArgument(0);
-            java.util.List<Integer> ids = new java.util.ArrayList<>();
-            for (int i = 1; i <= count; i++) ids.add(i);
-            return ids;
-        });
-        lenient().when(mapGraph.validMoves(anyInt(), any(), anyBoolean(), anyBoolean(), any()))
-                .thenReturn(java.util.List.of());
+    void setUp() {
+        service = new GameService(messaging, TestMaps.small(), ServiceFixtures.SETTINGS,
+                ServiceFixtures.NO_SHUFFLE, () -> now);
     }
 
-    // -------------------------------------------------------------------------
-    // createGame
-    // -------------------------------------------------------------------------
-
-    @Test
-    void createGame_validInput_returnsHostPlayerIdAndLobbyState() {
-        GameService.CreateResult result = gameService.createGame("Alice", 4);
-        assertThat(result.playerId()).isNotBlank();
-        assertThat(result.gameState().phase()).isEqualTo(GamePhase.LOBBY);
-        assertThat(result.gameState().players()).hasSize(1);
-        assertThat(result.gameState().players().get(0).name()).isEqualTo("Alice");
+    /** A started two-player game: the host is Mr X on node 1, the guest a detective on node 2. */
+    record Started(String gameId, JoinResponse mrX, JoinResponse detective) {
+        String topic() { return "/topic/games/" + gameId; }
+        String privateTopic(JoinResponse p) { return topic() + "/players/" + p.playerToken(); }
     }
 
-    @Test
-    void createGame_hostIsLobbyPlayer_noRoleOrTickets() {
-        GameService.CreateResult result = gameService.createGame("Alice", 4);
-        var player = result.gameState().players().get(0);
-        assertThat(player.role()).isNull();
-        assertThat(player.tickets()).isNull();
+    Started startTwoPlayerGame() {
+        JoinResponse host = service.createGame("Host", 2);
+        JoinResponse guest = service.joinGame(host.gameState().joinCode(), "Guest");
+        clearInvocations(messaging);
+        service.startGame(host.gameState().gameId(), host.playerToken());
+        return new Started(host.gameState().gameId(), host, guest);
+    }
+
+    /** Each destination and the last payload sent there since the last clearInvocations. */
+    Map<String, Object> published() {
+        ArgumentCaptor<String> destination = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(messaging, atLeastOnce()).convertAndSend(destination.capture(), payload.capture());
+        Map<String, Object> sent = new LinkedHashMap<>();
+        for (int i = 0; i < destination.getAllValues().size(); i++)
+            sent.put(destination.getAllValues().get(i), payload.getAllValues().get(i));
+        return sent;
+    }
+
+    static Integer mrXNode(GameState view) {
+        return view.players().stream().filter(p -> p.role() == Role.MR_X).findFirst().orElseThrow().nodeId();
     }
 
     @Test
-    void createGame_blankName_throwsWithGameNotCreatedMessage() {
-        assertThatThrownBy(() -> gameService.createGame("  ", 4))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Game not created");
+    void createReturnsASecretTokenAndBroadcastsNothing() {
+        JoinResponse host = service.createGame("Host", 4);
+        assertThat(host.playerToken()).isNotBlank().isNotEqualTo(host.playerId());
+        assertThat(host.gameState().phase()).isEqualTo(GamePhase.LOBBY);
+        assertThat(host.gameState().joinCode()).matches("[A-Z0-9]{6}");
+        verifyNoInteractions(messaging);
     }
 
     @Test
-    void createGame_nullName_throwsWithGameNotCreatedMessage() {
-        assertThatThrownBy(() -> gameService.createGame(null, 4))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Game not created");
+    void joinCodesAreCaseInsensitiveAndTrimmed() {
+        Random zeros = new Random() {
+            @Override
+            public int nextInt(int bound) {
+                return 0;
+            }
+        };
+        GameService lettersOnly = new GameService(messaging, TestMaps.small(), ServiceFixtures.SETTINGS, zeros, () -> now);
+        JoinResponse host = lettersOnly.createGame("Host", 4);
+        assertThat(host.gameState().joinCode()).isEqualTo("AAAAAA");
+        assertThat(lettersOnly.joinGame("  aaaaaa ", "Guest").gameState().players()).hasSize(2);
     }
 
     @Test
-    void createGame_maxPlayersBelow2_throwsWithGameNotCreatedMessage() {
-        assertThatThrownBy(() -> gameService.createGame("Alice", 1))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Game not created");
+    void joiningBroadcastsTheLobby() {
+        JoinResponse host = service.createGame("Host", 4);
+        service.joinGame(host.gameState().joinCode(), "Guest");
+        GameState lobby = (GameState) published().get("/topic/games/" + host.gameState().gameId());
+        assertThat(lobby.players()).extracting(PlayerView::name).containsExactly("Host", "Guest");
     }
 
     @Test
-    void createGame_maxPlayersAbove6_throwsWithGameNotCreatedMessage() {
-        assertThatThrownBy(() -> gameService.createGame("Alice", 7))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Game not created");
+    void joinErrorsAreReported() {
+        assertThatThrownBy(() -> service.joinGame("ZZZZZZ", "Guest")).isInstanceOf(GameNotFoundException.class);
+        assertThatThrownBy(() -> service.joinGame(" ", "Guest")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.joinGame(null, "Guest")).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void createGame_doesNotBroadcast() {
-        gameService.createGame("Alice", 4);
-        verify(messaging, never()).convertAndSend(anyString(), any(Object.class));
+    void anUnknownGameIsNotFound() {
+        assertThatThrownBy(() -> service.getGame("nope", null)).isInstanceOf(GameNotFoundException.class);
+        assertThatThrownBy(() -> service.startGame("nope", "t")).isInstanceOf(GameNotFoundException.class);
     }
 
     @Test
-    void createGame_trimsWhitespaceName() {
-        GameService.CreateResult result = gameService.createGame("  Alice  ", 3);
-        assertThat(result.gameState().players().get(0).name()).isEqualTo("Alice");
-    }
-
-    // -------------------------------------------------------------------------
-    // joinGame
-    // -------------------------------------------------------------------------
-
-    @Test
-    void joinGame_validCode_addsPlayerToSession() {
-        seedGame(lobbySession(4));
-
-        GameService.JoinResult result = gameService.joinGame("ABC123", "Bob");
-        assertThat(result.playerId()).isNotBlank();
-        assertThat(result.gameState().players()).hasSize(2);
+    void actingNeedsAValidTokenAndAPublicIdIsNotOne() {   // B2
+        Started g = startTwoPlayerGame();
+        for (String bad : new String[] {null, "not-a-token", g.mrX().playerId()}) {
+            assertThatThrownBy(() -> service.validMoves(g.gameId(), bad)).isInstanceOf(ForbiddenException.class);
+            assertThatThrownBy(() -> service.submitMove(g.gameId(), bad, 5, "FERRY")).isInstanceOf(ForbiddenException.class);
+            assertThatThrownBy(() -> service.removePlayer(g.gameId(), bad, g.mrX().playerId()))
+                    .isInstanceOf(ForbiddenException.class);
+            assertThatThrownBy(() -> service.startGame(g.gameId(), bad)).isInstanceOf(ForbiddenException.class);
+        }
     }
 
     @Test
-    void joinGame_unknownCode_throwsGameNotFoundException() {
-        assertThatThrownBy(() -> gameService.joinGame("XXXXXX", "Bob"))
-                .isInstanceOf(GameNotFoundException.class)
-                .hasMessageContaining("not found");
+    void readingWithAMissingOrUnknownTokenGivesThePublicView() {
+        Started g = startTwoPlayerGame();
+        assertThat(mrXNode(service.getGame(g.gameId(), null))).isNull();
+        assertThat(mrXNode(service.getGame(g.gameId(), "stale-token"))).isNull();
+        assertThat(mrXNode(service.getGame(g.gameId(), g.mrX().playerToken()))).isEqualTo(1);
     }
 
     @Test
-    void joinGame_gameNotInLobby_throwsConflictException() {
-        GameSession session = lobbySession(4);
-        session.setPhase(GamePhase.IN_PROGRESS);
-        seedGame(session);
-        assertThatThrownBy(() -> gameService.joinGame("ABC123", "Bob"))
-                .isInstanceOf(ConflictException.class)
-                .hasMessageContaining("lobby");
+    void startPublishesEachPlayersOwnViewAndMovesOnlyToMrX() {
+        Started g = startTwoPlayerGame();
+        Map<String, Object> sent = published();
+        assertThat(mrXNode((GameState) sent.get(g.privateTopic(g.mrX())))).isEqualTo(1);
+        assertThat(mrXNode((GameState) sent.get(g.privateTopic(g.detective())))).isNull();
+        assertThat(mrXNode((GameState) sent.get(g.topic()))).isNull();
+        assertThat(sent).containsKey(g.privateTopic(g.mrX()) + "/valid-moves");
+        assertThat(sent).doesNotContainKey(g.privateTopic(g.detective()) + "/valid-moves");
     }
 
     @Test
-    void joinGame_gameFull_throwsConflictException() {
-        GameSession session = lobbySession(2);
-        session.getPlayers().add(new LobbyPlayer("p2", "Bob"));
-        seedGame(session);
-        assertThatThrownBy(() -> gameService.joinGame("ABC123", "Charlie"))
-                .isInstanceOf(ConflictException.class)
-                .hasMessageContaining("full");
+    void afterAMoveTheNextPlayerGetsTheirMoves() {
+        Started g = startTwoPlayerGame();
+        clearInvocations(messaging);
+        service.submitMove(g.gameId(), g.mrX().playerToken(), 5, "FERRY");
+        Map<String, Object> sent = published();
+        assertThat(sent).containsKey(g.privateTopic(g.detective()) + "/valid-moves");
+        assertThat(sent).doesNotContainKey(g.privateTopic(g.mrX()) + "/valid-moves");
     }
 
     @Test
-    void joinGame_blankName_throws() {
-        assertThatThrownBy(() -> gameService.joinGame("ABC123", " "))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("name");
+    void tokensAppearInTopicNamesButNeverInPayloads() {   // B2
+        Started g = startTwoPlayerGame();
+        ObjectMapper json = new ObjectMapper();
+        for (Object payload : published().values()) {
+            String body = json.writeValueAsString(payload);
+            assertThat(body).doesNotContain(g.mrX().playerToken()).doesNotContain(g.detective().playerToken());
+        }
     }
 
     @Test
-    void joinGame_nullCode_throws() {
-        assertThatThrownBy(() -> gameService.joinGame(null, "Bob"))
-                .isInstanceOf(IllegalArgumentException.class);
+    void kickingPublishesTheLobbyWithoutTheKickedPlayer() {
+        JoinResponse host = service.createGame("Host", 4);
+        JoinResponse guest = service.joinGame(host.gameState().joinCode(), "Guest");
+        clearInvocations(messaging);
+        service.removePlayer(host.gameState().gameId(), host.playerToken(), guest.playerId());
+        GameState lobby = (GameState) published().get("/topic/games/" + host.gameState().gameId());
+        assertThat(lobby.players()).extracting(PlayerView::id).containsExactly(host.playerId());
     }
 
     @Test
-    void joinGame_lowercaseCodeIsNormalized() {
-        seedGame(lobbySession(4));
-        assertThatCode(() -> gameService.joinGame("abc123", "Bob")).doesNotThrowAnyException();
+    void theIdleSweepEndsStaleGamesAndTellsThePlayers() {
+        Started g = startTwoPlayerGame();
+        clearInvocations(messaging);
+        now = now.plusSeconds(ServiceFixtures.SETTINGS.turnTimerSeconds() + 1);
+        service.abortIdleGames();
+        GameState view = (GameState) published().get(g.privateTopic(g.detective()));
+        assertThat(view.phase()).isEqualTo(GamePhase.ENDED);
+        assertThat(view.abortReason()).contains("15-minute");
     }
 
     @Test
-    void joinGame_broadcastsSentToTopic() {
-        GameSession session = lobbySession(4);
-        seedGame(session);
-        gameService.joinGame("ABC123", "Bob");
-        verify(messaging).convertAndSend(
-                eq("/topic/games/" + session.getId()), any(GameState.class));
-    }
-
-    // -------------------------------------------------------------------------
-    // startGame
-    // -------------------------------------------------------------------------
-
-    @Test
-    void startGame_validHost_transitionsToInProgress() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-        assertThat(result.phase()).isEqualTo(GamePhase.IN_PROGRESS);
+    void theIdleSweepLeavesActiveGamesAlone() {
+        startTwoPlayerGame();
+        clearInvocations(messaging);
+        service.abortIdleGames();
+        verifyNoInteractions(messaging);
     }
 
     @Test
-    void startGame_assignsExactlyOneMrX() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-        long mrXCount = result.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).count();
-        assertThat(mrXCount).isEqualTo(1);
-    }
-
-    @Test
-    void startGame_allPlayersGetRoles() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-        assertThat(result.players()).allMatch(p -> p.role() != null);
-    }
-
-    @Test
-    void startGame_mrXHasUnlimitedTransportTickets() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-        var mrX = result.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow();
-        assertThat(mrX.tickets().get(TicketType.ESCOOTER)).isEqualTo(-1);
-        assertThat(mrX.tickets().get(TicketType.BUS)).isEqualTo(-1);
-        assertThat(mrX.tickets().get(TicketType.TRAIN)).isEqualTo(-1);
-        assertThat(mrX.tickets().get(TicketType.FERRY)).isEqualTo(-1);
-    }
-
-    @Test
-    void startGame_mrXBlackTicketsEqualDetectiveCount() {
-        GameSession session = lobbySessionWithThreePlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-        var mrX = result.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow();
-        assertThat(mrX.tickets().get(TicketType.BLACK)).isEqualTo(2);
-    }
-
-    @Test
-    void startGame_detectivesHaveFiniteTickets() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-        var detective = result.players().stream()
-                .filter(p -> Role.DETECTIVE.equals(p.role())).findFirst().orElseThrow();
-        assertThat(detective.tickets().get(TicketType.ESCOOTER)).isEqualTo(10);
-        assertThat(detective.tickets().get(TicketType.BUS)).isEqualTo(8);
-        assertThat(detective.tickets().get(TicketType.TRAIN)).isEqualTo(4);
-        assertThat(detective.tickets().get(TicketType.FERRY)).isEqualTo(2);
-    }
-
-    @Test
-    void startGame_setsRoundOneAndMrXTurn() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-        assertThat(result.round()).isEqualTo(1);
-        assertThat(result.turnPhase()).isEqualTo(TurnPhase.MR_X_TURN);
-    }
-
-    @Test
-    void startGame_notHost_throwsForbiddenException() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-        assertThatThrownBy(() -> gameService.startGame(session.getId(), "wrong-id"))
-                .isInstanceOf(ForbiddenException.class)
-                .hasMessageContaining("host");
-    }
-
-    @Test
-    void startGame_gameNotInLobby_throwsConflictException() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        session.setPhase(GamePhase.IN_PROGRESS);
-        seedGame(session);
-        assertThatThrownBy(() -> gameService.startGame(session.getId(), session.getHostPlayerId()))
-                .isInstanceOf(ConflictException.class)
-                .hasMessageContaining("lobby");
-    }
-
-    @Test
-    void startGame_gameNotFound_throwsGameNotFoundException() {
-        assertThatThrownBy(() -> gameService.startGame("no-such-game", "player-id"))
-                .isInstanceOf(GameNotFoundException.class);
-    }
-
-    @Test
-    void startGame_onlyOnePlayer_throws() {
-        GameSession session = lobbySession(4);
-        seedGame(session);
-        assertThatThrownBy(() -> gameService.startGame(session.getId(), session.getHostPlayerId()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("2 players");
-    }
-
-    @Test
-    void startGame_setsCurrentPlayerIdToMrX() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-
-        String mrXId = result.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow().id();
-        assertThat(result.currentPlayerId())
-                .as("currentPlayerId must be MrX's ID so the game engine knows whose turn it is")
-                .isEqualTo(mrXId);
-    }
-
-    @Test
-    void startGame_broadcastsToTopic() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        gameService.startGame(session.getId(), session.getHostPlayerId());
-
-        verify(messaging).convertAndSend(
-                eq("/topic/games/" + session.getId()), any(GameState.class));
-    }
-
-    @Test
-    void startGame_mrXDoubleTicketsIsTwo() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-
-        var mrX = result.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow();
-        assertThat(mrX.tickets().get(TicketType.DOUBLE))
-                .as("Mr X always starts with exactly 2 DOUBLE tickets")
-                .isEqualTo(2);
-    }
-
-    @Test
-    void startGame_twoPlayers_mrXBlackTicketIsOne() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-
-        var mrX = result.players().stream()
-                .filter(p -> Role.MR_X.equals(p.role())).findFirst().orElseThrow();
-        assertThat(mrX.tickets().get(TicketType.BLACK))
-                .as("BLACK tickets must equal detective count (1 detective here)")
-                .isEqualTo(1);
-    }
-
-    @Test
-    void startGame_detectivesHaveNoBlackOrDoubleTickets() {
-        GameSession session = lobbySessionWithTwoPlayers();
-        seedGame(session);
-
-        GameState result = gameService.startGame(session.getId(), session.getHostPlayerId());
-
-        result.players().stream()
-                .filter(p -> Role.DETECTIVE.equals(p.role()))
-                .forEach(d -> {
-                    assertThat(d.tickets()).doesNotContainKey(TicketType.BLACK);
-                    assertThat(d.tickets()).doesNotContainKey(TicketType.DOUBLE);
-                });
-    }
-
-    // -------------------------------------------------------------------------
-    // leaveGame
-    // -------------------------------------------------------------------------
-
-    @Test
-    void leaveGame_hostLeavesLobby_deletesGame() {
-        GameSession session = lobbySession(4);
-        seedGame(session);
-        gameService.leaveGame(session.getId(), session.getHostPlayerId());
-        assertThat(games()).doesNotContainKey(session.getId());
-    }
-
-    @Test
-    void leaveGame_nonHostLeavesLobby_savesUpdatedSession() {
-        GameSession session = lobbySession(4);
-        String joinerId = "joiner-id";
-        session.getPlayers().add(new LobbyPlayer(joinerId, "Bob"));
-        seedGame(session);
-
-        gameService.leaveGame(session.getId(), joinerId);
-
-        assertThat(session.getPlayers()).hasSize(1);
-    }
-
-    @Test
-    void leaveGame_mrXLeavesInProgress_setsEndedWithAbortReason() {
-        GameSession session = inProgressSession();
-        String mrXId = session.getPlayers().stream()
-                .filter(p -> p instanceof MrXPlayer).findFirst().orElseThrow().getId();
-        seedGame(session);
-
-        gameService.leaveGame(session.getId(), mrXId);
-
-        assertThat(session.getPhase()).isEqualTo(GamePhase.ENDED);
-        assertThat(session.getAbortReason()).isNotBlank();
-    }
-
-    @Test
-    void leaveGame_unknownPlayer_throwsGameNotFoundException() {
-        GameSession session = lobbySession(4);
-        seedGame(session);
-        assertThatThrownBy(() -> gameService.leaveGame(session.getId(), "no-such-id"))
-                .isInstanceOf(GameNotFoundException.class);
-    }
-
-    @Test
-    void leaveGame_gameNotFound_throwsGameNotFoundException() {
-        assertThatThrownBy(() -> gameService.leaveGame("no-such-game", "player-id"))
-                .isInstanceOf(GameNotFoundException.class)
-                .hasMessageContaining("not found");
-    }
-
-    @Test
-    void leaveGame_mrXLeaves_mrXRemovedFromPlayerList() {
-        GameSession session = inProgressSession();
-        String mrXId = session.getPlayers().stream()
-                .filter(p -> p instanceof MrXPlayer).findFirst().orElseThrow().getId();
-        seedGame(session);
-
-        gameService.leaveGame(session.getId(), mrXId);
-
-        assertThat(session.getPlayers())
-                .as("MrX must be removed from the player list when they leave")
-                .noneMatch(p -> p.getId().equals(mrXId));
-    }
-
-    @Test
-    void leaveGame_mrXLeaves_broadcastsEndedState() {
-        GameSession session = inProgressSession();
-        String mrXId = session.getPlayers().stream()
-                .filter(p -> p instanceof MrXPlayer).findFirst().orElseThrow().getId();
-        seedGame(session);
-
-        gameService.leaveGame(session.getId(), mrXId);
-
-        // In-progress games broadcast per-player (not the shared lobby topic)
-        ArgumentCaptor<GameState> stateCaptor = ArgumentCaptor.forClass(GameState.class);
-        verify(messaging, atLeast(1)).convertAndSend(
-                contains("/topic/games/" + session.getId() + "/players/"),
-                stateCaptor.capture());
-        assertThat(stateCaptor.getValue().phase()).isEqualTo(GamePhase.ENDED);
-        assertThat(stateCaptor.getValue().abortReason()).isNotBlank();
-    }
-
-    @Test
-    void leaveGame_detectiveLeaves_inProgress_detectiveRemovedFromList() {
-        GameSession session = inProgressSession();
-        String detectiveId = session.getPlayers().stream()
-                .filter(p -> p instanceof DetectivePlayer).findFirst().orElseThrow().getId();
-        seedGame(session);
-
-        gameService.leaveGame(session.getId(), detectiveId);
-
-        assertThat(session.getPlayers())
-                .as("detective must be removed but game must not end")
-                .noneMatch(p -> p.getId().equals(detectiveId));
-        assertThat(session.getPhase()).isEqualTo(GamePhase.IN_PROGRESS);
-    }
-
-    @Test
-    void leaveGame_detectiveLeaves_inProgress_broadcasts() {
-        GameSession session = inProgressSession();
-        String detectiveId = session.getPlayers().stream()
-                .filter(p -> p instanceof DetectivePlayer).findFirst().orElseThrow().getId();
-        seedGame(session);
-
-        gameService.leaveGame(session.getId(), detectiveId);
-
-        verify(messaging).convertAndSend(eq("/topic/games/" + session.getId()), any(GameState.class));
-    }
-
-    // -------------------------------------------------------------------------
-    // kickPlayer
-    // -------------------------------------------------------------------------
-
-    @Test
-    void kickPlayer_validKick_removesTargetPlayer() {
-        GameSession session = lobbySession(4);
-        String joinerId = "joiner-id";
-        session.getPlayers().add(new LobbyPlayer(joinerId, "Bob"));
-        seedGame(session);
-
-        gameService.kickPlayer(session.getId(), session.getHostPlayerId(), joinerId);
-
-        assertThat(session.getPlayers()).noneMatch(p -> p.getId().equals(joinerId));
-    }
-
-    @Test
-    void kickPlayer_notHost_throwsForbiddenException() {
-        GameSession session = lobbySession(4);
-        session.getPlayers().add(new LobbyPlayer("joiner", "Bob"));
-        seedGame(session);
-        assertThatThrownBy(() -> gameService.kickPlayer(session.getId(), "wrong-host", "joiner"))
-                .isInstanceOf(ForbiddenException.class)
-                .hasMessageContaining("host");
-    }
-
-    @Test
-    void kickPlayer_selfKick_throwsIllegalArgumentException() {
-        GameSession session = lobbySession(4);
-        seedGame(session);
-        assertThatThrownBy(() -> gameService.kickPlayer(
-                session.getId(), session.getHostPlayerId(), session.getHostPlayerId()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("themselves");
-    }
-
-    @Test
-    void kickPlayer_duringInProgress_throwsConflictException() {
-        GameSession session = inProgressSession();
-        seedGame(session);
-        String detectiveId = session.getPlayers().stream()
-                .filter(p -> p instanceof DetectivePlayer).findFirst().orElseThrow().getId();
-        assertThatThrownBy(() -> gameService.kickPlayer(
-                session.getId(), session.getHostPlayerId(), detectiveId))
-                .isInstanceOf(ConflictException.class)
-                .hasMessageContaining("lobby");
-    }
-
-    @Test
-    void kickPlayer_unknownTarget_throwsGameNotFoundException() {
-        GameSession session = lobbySession(4);
-        seedGame(session);
-        assertThatThrownBy(() -> gameService.kickPlayer(
-                session.getId(), session.getHostPlayerId(), "no-such-player"))
-                .isInstanceOf(GameNotFoundException.class);
-    }
-
-    @Test
-    void kickPlayer_broadcastsSentAfterKick() {
-        GameSession session = lobbySession(4);
-        String joinerId = "joiner-id";
-        session.getPlayers().add(new LobbyPlayer(joinerId, "Bob"));
-        seedGame(session);
-
-        gameService.kickPlayer(session.getId(), session.getHostPlayerId(), joinerId);
-
-        verify(messaging).convertAndSend(
-                eq("/topic/games/" + session.getId()), any(GameState.class));
-    }
-
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    /** GameService keeps sessions in a private in-memory map (no repository
-     *  interface to mock) — tests seed/inspect fixture sessions directly. */
-    @SuppressWarnings("unchecked")
-    private Map<String, GameSession> games() {
-        return (Map<String, GameSession>) ReflectionTestUtils.getField(gameService, "games");
-    }
-
-    private void seedGame(GameSession session) {
-        games().put(session.getId(), session);
-    }
-
-    private GameSession lobbySession(int maxPlayers) {
-        GameSession s = new GameSession();
-        s.setId("game-id");
-        s.setJoinCode("ABC123");
-        s.setPhase(GamePhase.LOBBY);
-        s.setMaxPlayers(maxPlayers);
-        s.setHostPlayerId("host-id");
-        s.getPlayers().add(new LobbyPlayer("host-id", "Host"));
-        return s;
-    }
-
-    private GameSession lobbySessionWithTwoPlayers() {
-        GameSession s = lobbySession(4);
-        s.getPlayers().add(new LobbyPlayer("player-2", "Bob"));
-        return s;
-    }
-
-    private GameSession lobbySessionWithThreePlayers() {
-        GameSession s = lobbySessionWithTwoPlayers();
-        s.getPlayers().add(new LobbyPlayer("player-3", "Charlie"));
-        return s;
-    }
-
-    private GameSession inProgressSession() {
-        GameSession s = new GameSession();
-        s.setId("game-id");
-        s.setJoinCode("ABC123");
-        s.setPhase(GamePhase.IN_PROGRESS);
-        s.setMaxPlayers(4);
-        s.setHostPlayerId("mrx-id");
-        s.setRound(1);
-        s.setTurnPhase(TurnPhase.MR_X_TURN);
-        s.getPlayers().add(new MrXPlayer("mrx-id", "Mr X", 1));
-        s.getPlayers().add(new DetectivePlayer("det-id", "Alice", 10, 8, 4, 2));
-        return s;
+    void concurrentJoinsNeverOverfillAGame() throws Exception {   // B7
+        JoinResponse host = service.createGame("Host", 6);
+        String code = host.gameState().joinCode();
+        ExecutorService pool = Executors.newFixedThreadPool(20);
+        CountDownLatch go = new CountDownLatch(1);
+        List<Future<Boolean>> joins = new ArrayList<>();
+        for (int i = 0; i < 40; i++) {
+            String name = "P" + i;
+            joins.add(pool.submit(() -> {
+                go.await();
+                try {
+                    service.joinGame(code, name);
+                    return true;
+                } catch (ConflictException full) {
+                    return false;
+                }
+            }));
+        }
+        go.countDown();
+        int joined = 0;
+        for (Future<Boolean> join : joins) if (join.get(10, TimeUnit.SECONDS)) joined++;
+        pool.shutdown();
+        assertThat(joined).isEqualTo(5);
+        assertThat(service.getGame(host.gameState().gameId(), null).players()).hasSize(6);
     }
 }
