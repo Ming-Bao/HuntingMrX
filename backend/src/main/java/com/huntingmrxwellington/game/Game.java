@@ -2,7 +2,9 @@ package com.huntingmrxwellington.game;
 
 import com.huntingmrxwellington.exception.ConflictException;
 import com.huntingmrxwellington.exception.ForbiddenException;
+import com.huntingmrxwellington.exception.GameNotFoundException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.util.ArrayList;
@@ -224,6 +226,36 @@ public final class Game {
         current = null;
         turnPhase = null;
         doubleMovePending = false;
+    }
+
+    // ── Leaving ──────────────────────────────────────────────────────────────
+
+    /** Removes a player. The host leaving the lobby closes it, and anyone leaving a game in
+     *  progress ends it. Returns true when nobody is left, so the caller can forget the game. */
+    public boolean leave(Player player) {
+        boolean wasHost = player == host();
+        players.remove(player);
+        if (phase == GamePhase.LOBBY && wasHost && !players.isEmpty()) {
+            end(null, "The host left the game");
+        } else if (phase == GamePhase.IN_PROGRESS) {
+            end(null, (player.isMrX() ? "Mr. X" : player.name()) + " has left the game");
+        }
+        return players.isEmpty();
+    }
+
+    /** The host removes another player from the lobby. */
+    public void kick(Player requester, String targetId) {
+        requirePhase(GamePhase.LOBBY, "Players can only be kicked during the lobby");
+        if (requester != host()) throw new ForbiddenException("Only the host can kick players");
+        if (requester.id().equals(targetId)) throw new IllegalArgumentException("Host cannot kick themselves");
+        if (!players.removeIf(p -> p.id().equals(targetId))) throw new GameNotFoundException("Player not found");
+    }
+
+    /** Ends the game if the current player hasn't moved within the limit. */
+    public boolean abortIfIdle(Duration limit) {
+        if (phase != GamePhase.IN_PROGRESS || !clock.instant().isAfter(turnStartedAt.plus(limit))) return false;
+        end(null, "A player exceeded the " + limit.toMinutes() + "-minute turn limit");
+        return true;
     }
 
     // ── Views ────────────────────────────────────────────────────────────────

@@ -519,4 +519,159 @@ class GameTest {
                     .extracting(MrXMove::round).containsExactly(2, 8, 13, 18, 24);
         }
     }
+
+    @Nested
+    class Leaving {
+
+        @Test
+        void aNonHostLeavingTheLobbyIsJustRemoved() {
+            Game g = newGame(4);
+            Player host = g.join("Host");
+            Player guest = g.join("Guest");
+            assertThat(g.leave(guest)).isFalse();
+            assertThat(g.players()).containsExactly(host);
+            assertThat(g.phase()).isEqualTo(GamePhase.LOBBY);
+        }
+
+        @Test
+        void theHostLeavingTheLobbyEndsItForEveryone() {   // B6
+            Game g = newGame(4);
+            Player host = g.join("Host");
+            g.join("Guest");
+            assertThat(g.leave(host)).isFalse();
+            assertThat(g.phase()).isEqualTo(GamePhase.ENDED);
+            assertThat(g.abortReason()).isEqualTo("The host left the game");
+        }
+
+        @Test
+        void theLastPlayerLeavingReportsTheGameIsEmpty() {
+            Game g = newGame(4);
+            Player host = g.join("Host");
+            assertThat(g.leave(host)).isTrue();
+        }
+
+        @Test
+        void aDetectiveLeavingOnTheirTurnEndsTheGame() {   // B3
+            start(1, 3, 6);
+            game.move(mrX, 5, "FERRY");                     // Alice's turn
+            game.leave(alice);
+            assertThat(game.phase()).isEqualTo(GamePhase.ENDED);
+            assertThat(game.abortReason()).isEqualTo("Alice has left the game");
+            assertThat(game.currentPlayer()).isEmpty();
+            assertThat(game.players()).doesNotContain(alice);
+        }
+
+        @Test
+        void aDetectiveLeavingOffTheirTurnAlsoEndsTheGame() {
+            start(1, 3, 6);
+            game.move(mrX, 5, "FERRY");                     // Alice's turn; Bob leaves
+            game.leave(bob);
+            assertThat(game.abortReason()).isEqualTo("Bob has left the game");
+        }
+
+        @Test
+        void mrXLeavingMidDoubleEndsTheGameWithNoWinner() {
+            start(1, 7);
+            game.move(mrX, 2, "DOUBLE_BUS");
+            game.leave(mrX);
+            assertThat(game.abortReason()).isEqualTo("Mr. X has left the game");
+            assertThat(game.winner()).isNull();
+            assertThat(game.doubleMovePending()).isFalse();
+        }
+
+        @Test
+        void leavingAnEndedGameJustRemovesThePlayer() {
+            start(1, 3);
+            game.leave(mrX);
+            assertThat(game.leave(alice)).isTrue();
+            assertThat(game.abortReason()).isEqualTo("Mr. X has left the game");
+        }
+    }
+
+    @Nested
+    class Kicking {
+
+        @Test
+        void theHostCanKickInTheLobby() {
+            Game g = newGame(4);
+            Player host = g.join("Host");
+            Player guest = g.join("Guest");
+            g.kick(host, guest.id());
+            assertThat(g.players()).containsExactly(host);
+        }
+
+        @Test
+        void onlyTheHostCanKick() {
+            Game g = newGame(4);
+            Player host = g.join("Host");
+            Player guest = g.join("Guest");
+            assertThatThrownBy(() -> g.kick(guest, host.id())).isInstanceOf(ForbiddenException.class);
+        }
+
+        @Test
+        void theHostCannotKickThemselves() {
+            Game g = newGame(4);
+            Player host = g.join("Host");
+            assertThatThrownBy(() -> g.kick(host, host.id()))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("themselves");
+        }
+
+        @Test
+        void kickingAnUnknownPlayerIsNotFound() {
+            Game g = newGame(4);
+            Player host = g.join("Host");
+            assertThatThrownBy(() -> g.kick(host, "nobody")).isInstanceOf(GameNotFoundException.class);
+        }
+
+        @Test
+        void nobodyCanBeKickedOnceTheGameStarts() {   // B2: a detective can't remove Mr X
+            start(1, 3);
+            assertThatThrownBy(() -> game.kick(alice, mrX.id())).isInstanceOf(ConflictException.class);
+            assertThatThrownBy(() -> game.kick(mrX, alice.id())).isInstanceOf(ConflictException.class);
+            assertThat(game.phase()).isEqualTo(GamePhase.IN_PROGRESS);
+        }
+    }
+
+    @Nested
+    class IdleAbort {
+
+        final Duration limit = Duration.ofMinutes(15);
+
+        @Test
+        void theGameEndsWhenTheCurrentPlayerIdlesPastTheLimit() {
+            start(1, 3);
+            advance(limit);
+            assertThat(game.abortIfIdle(limit)).isFalse();       // exactly at the limit is still fine
+            advance(Duration.ofSeconds(1));
+            assertThat(game.abortIfIdle(limit)).isTrue();
+            assertThat(game.phase()).isEqualTo(GamePhase.ENDED);
+            assertThat(game.abortReason()).isEqualTo("A player exceeded the 15-minute turn limit");
+        }
+
+        @Test
+        void everyNewTurnRestartsTheClock() {
+            start(1, 3);
+            advance(Duration.ofMinutes(10));
+            game.move(mrX, 5, "FERRY");                          // Alice's turn starts now
+            advance(Duration.ofMinutes(10));
+            assertThat(game.abortIfIdle(limit)).isFalse();
+        }
+
+        @Test
+        void theSecondLegOfADoubleGetsAFreshClock() {
+            start(1, 7);
+            advance(Duration.ofMinutes(10));
+            game.move(mrX, 2, "DOUBLE_BUS");
+            advance(Duration.ofMinutes(10));
+            assertThat(game.abortIfIdle(limit)).isFalse();
+        }
+
+        @Test
+        void lobbiesAreNeverIdleAborted() {
+            Game g = newGame(3);
+            g.join("Host");
+            advance(Duration.ofDays(1));
+            assertThat(g.abortIfIdle(limit)).isFalse();
+        }
+    }
 }
