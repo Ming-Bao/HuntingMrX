@@ -130,6 +130,38 @@ public final class Game {
         return map.validMoves(player, player.isMrX() ? detectiveNodes() : Set.of());
     }
 
+    /** Plays one leg for the current player. ticket is ESCOOTER, BUS, TRAIN, FERRY or BLACK,
+     *  or DOUBLE_<one of those> for the first leg of Mr X's double move. */
+    public void move(Player player, int to, String ticket) {
+        requirePhase(GamePhase.IN_PROGRESS, "Game is not in progress");
+        if (player != current) throw new ForbiddenException("Not your turn");
+        if (ticket == null) throw new IllegalArgumentException("Ticket is required");
+        boolean startsDouble = ticket.startsWith("DOUBLE_");
+        TicketType leg = legTicket(startsDouble ? ticket.substring("DOUBLE_".length()) : ticket, ticket);
+        if (startsDouble) {
+            if (doubleMovePending) throw new IllegalArgumentException("A double move is already in progress");
+            if (!player.has(DOUBLE)) throw new IllegalArgumentException("No DOUBLE tickets left");
+        }
+        Set<TicketType> modes = map.modesBetween(player.node(), to);
+        if (modes.isEmpty()) throw new IllegalArgumentException("No connection between those nodes");
+        if (leg != BLACK && !modes.contains(leg))
+            throw new IllegalArgumentException("Ticket type " + leg + " not valid for this edge");
+        if (!player.has(leg)) throw new IllegalArgumentException("No " + leg + " tickets left");
+        if (player.isMrX() && detectiveNodes().contains(to))
+            throw new IllegalArgumentException("Mr X cannot move to a node occupied by a detective");
+
+        if (startsDouble) player.spend(DOUBLE);
+        player.spend(leg);
+        player.moveTo(to);
+        if (player.isMrX()) afterMrXLeg(to, leg, startsDouble);
+        else afterDetectiveMove(player);
+    }
+
+    private static TicketType legTicket(String name, String asSent) {
+        for (TicketType t : List.of(ESCOOTER, BUS, TRAIN, FERRY, BLACK)) if (t.name().equals(name)) return t;
+        throw new IllegalArgumentException("Unknown ticket: " + asSent);
+    }
+
     // ── Turns ────────────────────────────────────────────────────────────────
 
     /** Mr X to move, unless detectives hold every node next to him: then they win. */
@@ -140,6 +172,44 @@ public final class Game {
         }
         turnPhase = TurnPhase.MR_X_TURN;
         setCurrent(mrX());
+    }
+
+    private void afterMrXLeg(int to, TicketType leg, boolean startsDouble) {
+        Integer revealed = !startsDouble && REVEAL_ROUNDS.contains(round) ? to : null;
+        mrXLog.add(new MrXMove(round, doubleMovePending ? 2 : 1, leg, revealed, startsDouble));
+        doubleMovePending = startsDouble;
+        if (startsDouble) setCurrent(current);   // a fresh clock for the second leg
+        else giveTurnToNextDetective(-1);
+    }
+
+    private void afterDetectiveMove(Player detective) {
+        if (detective.node().equals(mrX().node())) {
+            end(Winner.DETECTIVES, null);
+            return;
+        }
+        giveTurnToNextDetective(detectives().indexOf(detective));
+    }
+
+    /** The next detective after position `after` who can move; if none can, the round ends. */
+    private void giveTurnToNextDetective(int after) {
+        List<Player> detectives = detectives();
+        for (int i = after + 1; i < detectives.size(); i++) {
+            if (!movesFrom(detectives.get(i)).isEmpty()) {
+                turnPhase = TurnPhase.DETECTIVE_TURN;
+                setCurrent(detectives.get(i));
+                return;
+            }
+        }
+        endRound();
+    }
+
+    private void endRound() {
+        if (round >= LAST_ROUND) {
+            end(Winner.MR_X, null);
+            return;
+        }
+        round++;
+        giveTurnToMrX();
     }
 
     private void setCurrent(Player player) {

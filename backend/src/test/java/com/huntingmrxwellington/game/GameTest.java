@@ -240,4 +240,283 @@ class GameTest {
             assertThat(json).doesNotContain(mrX.token()).doesNotContain(alice.token());
         }
     }
+
+    @Nested
+    class Moves {
+
+        @Test
+        void onlyTheCurrentPlayerMayMove() {
+            start(1, 3);
+            assertThatThrownBy(() -> game.move(alice, 2, "ESCOOTER"))
+                    .isInstanceOf(ForbiddenException.class).hasMessage("Not your turn");
+        }
+
+        @Test
+        void aLegalMoveSpendsTheTicketAndMoves() {
+            start(1, 3);
+            game.move(mrX, 5, "FERRY");
+            game.move(alice, 4, "TRAIN");
+            assertThat(alice.node()).isEqualTo(4);
+            assertThat(alice.tickets().get(TRAIN)).isEqualTo(29);
+            assertThat(mrX.tickets().get(FERRY)).isEqualTo(Player.UNLIMITED);
+        }
+
+        @Test
+        void aMoveMustFollowAnEdge() {
+            start(1, 3);
+            assertThatThrownBy(() -> game.move(mrX, 4, "BUS"))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("No connection");
+        }
+
+        @Test
+        void theTicketMustMatchTheEdge() {
+            start(1, 3);
+            assertThatThrownBy(() -> game.move(mrX, 5, "BUS"))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("not valid for this edge");
+        }
+
+        @Test
+        void aDetectiveWithoutThatTicketIsRejected() {
+            startWith(Map.of(ESCOOTER, 5, BUS, 5, TRAIN, 0, FERRY, 0), 1, 3);
+            game.move(mrX, 5, "FERRY");
+            assertThatThrownBy(() -> game.move(alice, 4, "TRAIN"))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("No TRAIN tickets");
+        }
+
+        @Test
+        void unknownOrMissingTicketsAreRejected() {
+            start(1, 3);
+            assertThatThrownBy(() -> game.move(mrX, 2, "TAXI"))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Unknown ticket");
+            assertThatThrownBy(() -> game.move(mrX, 2, null)).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void mrXCannotMoveOntoADetective() {
+            start(1, 2, 7);
+            assertThatThrownBy(() -> game.move(mrX, 2, "BUS"))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("occupied");
+        }
+
+        @Test
+        void detectivesMayShareANode() {
+            start(1, 3, 6);
+            game.move(mrX, 5, "FERRY");
+            game.move(alice, 2, "ESCOOTER");
+            game.move(bob, 2, "BUS");
+            assertThat(bob.node()).isEqualTo(2);
+        }
+
+        @Test
+        void theInvisibleTicketWorksOnAnyEdgeAndIsLogged() {
+            start(1, 3);
+            game.move(mrX, 5, "BLACK");                         // along the FERRY edge
+            assertThat(mrX.tickets().get(BLACK)).isZero();      // one detective, one Invisible ticket
+            assertThat(game.mrXLog()).singleElement().extracting(MrXMove::ticketUsed).isEqualTo(BLACK);
+        }
+
+        @Test
+        void detectivesHaveNoInvisibleOrDoubleTickets() {
+            start(1, 3);
+            game.move(mrX, 5, "FERRY");
+            assertThatThrownBy(() -> game.move(alice, 4, "BLACK")).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> game.move(alice, 4, "DOUBLE_TRAIN")).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void nobodyMovesInTheLobby() {
+            Game g = newGame(3);
+            Player host = g.join("Host");
+            assertThatThrownBy(() -> g.move(host, 2, "BUS")).isInstanceOf(ConflictException.class);
+        }
+    }
+
+    @Nested
+    class ValidMoves {
+
+        @Test
+        void eachReachableNodeComesWithTheTicketsThatPayForIt() {
+            start(1, 3);
+            assertThat(game.validMoves(mrX)).containsExactly(
+                    new ValidMove(2, List.of(ESCOOTER, BUS, BLACK)),
+                    new ValidMove(5, List.of(FERRY, BLACK)));
+        }
+
+        @Test
+        void detectivesBlockMrXButNotEachOther() {
+            start(1, 2, 7);
+            assertThat(game.validMoves(mrX)).extracting(ValidMove::nodeId).containsExactly(5);
+        }
+
+        @Test
+        void usedUpTicketsAreNotOffered() {
+            startWith(Map.of(ESCOOTER, 0, BUS, 5, TRAIN, 0, FERRY, 0), 5, 1);
+            game.move(mrX, 4, "BUS");
+            assertThat(game.validMoves(alice)).containsExactly(new ValidMove(2, List.of(BUS)));
+        }
+    }
+
+    @Nested
+    class Turns {
+
+        @Test
+        void detectivesMoveInTurnOrderThenANewRoundStarts() {
+            start(1, 3, 6);
+            game.move(mrX, 5, "FERRY");
+            assertThat(game.currentPlayer()).contains(alice);
+            game.move(alice, 4, "TRAIN");
+            assertThat(game.currentPlayer()).contains(bob);
+            game.move(bob, 7, "ESCOOTER");
+            assertThat(game.round()).isEqualTo(2);
+            assertThat(game.currentPlayer()).contains(mrX);
+            assertThat(game.viewFor(null).turnPhase()).isEqualTo(TurnPhase.MR_X_TURN);
+        }
+
+        @Test
+        void aDetectiveWithNoLegalMoveIsSkippedWithoutSpendingTickets() {
+            startWith(Map.of(ESCOOTER, 0, BUS, 5, TRAIN, 0, FERRY, 0), 1, 3, 6);   // Alice on 3 is stuck
+            game.move(mrX, 5, "FERRY");
+            assertThat(game.currentPlayer()).contains(bob);
+            assertThat(alice.tickets().get(BUS)).isEqualTo(5);
+        }
+
+        @Test
+        void whenNoDetectiveCanMoveTheRoundEnds() {
+            startWith(Map.of(ESCOOTER, 0, BUS, 0, TRAIN, 0, FERRY, 0), 1, 3);
+            game.move(mrX, 5, "FERRY");
+            assertThat(game.round()).isEqualTo(2);
+            assertThat(game.currentPlayer()).contains(mrX);
+        }
+    }
+
+    @Nested
+    class DoubleMoves {
+
+        @Test
+        void aDoubleMoveGivesMrXTwoLegsBeforeTheDetectives() {
+            start(1, 7);
+            game.move(mrX, 2, "DOUBLE_BUS");
+            assertThat(game.currentPlayer()).contains(mrX);
+            assertThat(game.doubleMovePending()).isTrue();
+            game.move(mrX, 3, "ESCOOTER");
+            assertThat(game.doubleMovePending()).isFalse();
+            assertThat(game.currentPlayer()).contains(alice);
+            assertThat(mrX.tickets().get(DOUBLE)).isEqualTo(1);
+            assertThat(game.mrXLog()).containsExactly(
+                    new MrXMove(1, 1, BUS, null, true),
+                    new MrXMove(1, 2, ESCOOTER, null, false));
+        }
+
+        @Test
+        void aSecondDoubleDuringADoubleIsRejected() {   // B4
+            start(1, 7);
+            game.move(mrX, 2, "DOUBLE_BUS");
+            assertThatThrownBy(() -> game.move(mrX, 3, "DOUBLE_ESCOOTER"))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("already in progress");
+            assertThat(mrX.tickets().get(DOUBLE)).isEqualTo(1);
+        }
+
+        @Test
+        void aPlainDoubleTicketIsRejected() {   // B5
+            start(1, 7);
+            assertThatThrownBy(() -> game.move(mrX, 2, "DOUBLE"))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Unknown ticket");
+            assertThat(mrX.tickets().get(DOUBLE)).isEqualTo(2);
+        }
+
+        @Test
+        void aDoubleLegStillHasToMatchTheEdgeAndARejectedMoveSpendsNothing() {
+            start(1, 7);
+            assertThatThrownBy(() -> game.move(mrX, 5, "DOUBLE_BUS")).isInstanceOf(IllegalArgumentException.class);
+            assertThat(mrX.tickets().get(DOUBLE)).isEqualTo(2);
+        }
+
+        @Test
+        void theInvisibleTicketCanPayForADoubleLeg() {
+            start(1, 7);
+            game.move(mrX, 5, "DOUBLE_BLACK");
+            assertThat(mrX.tickets().get(BLACK)).isZero();
+            assertThat(game.mrXLog().get(0).ticketUsed()).isEqualTo(BLACK);
+        }
+
+        @Test
+        void aThirdDoubleIsRejectedOnceBothAreUsed() {
+            start(1, 7);
+            game.move(mrX, 2, "DOUBLE_BUS");
+            game.move(mrX, 1, "BUS");                       // round 1: 1 -> 2 -> 1
+            game.move(alice, 6, "ESCOOTER");
+            game.move(mrX, 5, "DOUBLE_FERRY");
+            game.move(mrX, 4, "BUS");                       // round 2: 1 -> 5 -> 4
+            game.move(alice, 7, "ESCOOTER");
+            assertThatThrownBy(() -> game.move(mrX, 3, "DOUBLE_TRAIN"))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("No DOUBLE");
+        }
+    }
+
+    @Nested
+    class Reveals {
+
+        @Test
+        void aRevealRoundShowsMrXUntilTheRoundEnds() {
+            start(1, 7);
+            game.move(mrX, 5, "FERRY");
+            game.move(alice, 6, "ESCOOTER");                            // round 1: hidden
+            assertThat(game.mrXLog().get(0).nodeId()).isNull();
+            game.move(mrX, 4, "BUS");                                   // round 2: revealed
+            assertThat(game.mrXLog().get(1).nodeId()).isEqualTo(4);
+            assertThat(nodeSeen(game.viewFor(alice), mrX)).isEqualTo(4);
+            game.move(alice, 7, "ESCOOTER");                            // round 3 begins
+            assertThat(nodeSeen(game.viewFor(alice), mrX)).isNull();
+        }
+
+        @Test
+        void onADoubleMoveOnlyTheFinalLegIsRevealed() {
+            start(1, 7);
+            game.move(mrX, 5, "FERRY");
+            game.move(alice, 6, "ESCOOTER");
+            game.move(mrX, 1, "DOUBLE_FERRY");                          // round 2: 5 -> 1 -> 2
+            game.move(mrX, 2, "BUS");
+            assertThat(game.mrXLog().subList(1, 3)).extracting(MrXMove::nodeId).containsExactly(null, 2);
+        }
+    }
+
+    @Nested
+    class Endings {
+
+        @Test
+        void aDetectiveLandingOnMrXWins() {
+            start(1, 3);
+            game.move(mrX, 2, "BUS");
+            game.move(alice, 2, "ESCOOTER");
+            assertThat(game.phase()).isEqualTo(GamePhase.ENDED);
+            assertThat(game.winner()).isEqualTo(Winner.DETECTIVES);
+            assertThat(game.currentPlayer()).isEmpty();
+        }
+
+        @Test
+        void mrXWithNoLegalMoveAtTheStartOfHisTurnLoses() {   // B1
+            start(6, 2);
+            game.move(mrX, 7, "ESCOOTER");
+            game.move(alice, 6, "BUS");                        // Mr X's only way out is now held
+            assertThat(game.phase()).isEqualTo(GamePhase.ENDED);
+            assertThat(game.winner()).isEqualTo(Winner.DETECTIVES);
+            assertThat(game.round()).isEqualTo(2);
+        }
+
+        @Test
+        void mrXSurvivingRound24WinsAndIsRevealedOnTheRevealRounds() {
+            start(4, 7);                                       // Mr X shuttles 4 <-> 5, Alice 7 <-> 6
+            for (int round = 1; round <= 24; round++) {
+                assertThat(game.winner()).isNull();
+                game.move(mrX, round % 2 == 1 ? 5 : 4, "BUS");
+                game.move(alice, round % 2 == 1 ? 6 : 7, "ESCOOTER");
+            }
+            assertThat(game.phase()).isEqualTo(GamePhase.ENDED);
+            assertThat(game.winner()).isEqualTo(Winner.MR_X);
+            assertThat(game.round()).isEqualTo(24);
+            assertThat(game.mrXLog()).hasSize(24);
+            assertThat(game.mrXLog()).filteredOn(m -> m.nodeId() != null)
+                    .extracting(MrXMove::round).containsExactly(2, 8, 13, 18, 24);
+        }
+    }
 }
