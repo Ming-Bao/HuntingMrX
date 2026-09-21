@@ -51,10 +51,10 @@ Map rendering uses one distinct colour per mode:
 **Each detective (per game):**
 
 ```
-DETECTIVE_ESCOOTER_TICKETS = TBD   // placeholder, e.g. 10
-DETECTIVE_BUS_TICKETS      = TBD   // placeholder, e.g. 8
-DETECTIVE_TRAIN_TICKETS    = TBD   // placeholder, e.g. 4
-DETECTIVE_FERRY_TICKETS    = TBD   // placeholder, e.g. 2
+game.detective-escooter-tickets = 12
+game.detective-bus-tickets      = 8
+game.detective-train-tickets    = 6
+game.detective-ferry-tickets    = 2
 ```
 
 These are global constants defined in `application.properties`. Detectives do not share tickets.
@@ -63,25 +63,23 @@ These are global constants defined in `application.properties`. Detectives do no
 
 The game runs for rounds 1–24. Within each round:
 
-1. **Mr X's turn** — Mr X makes one move (or two if using a DOUBLE ticket)
-2. **Detective turns** — each detective moves in the order they joined the game; a detective with no valid moves is automatically skipped
+1. **Mr X's turn**: Mr X makes one move (or two with a DOUBLE ticket). If he has no legal move when his turn starts, because detectives hold every node next to him, the detectives win.
+2. **Detective turns**: each detective moves in a random order fixed when the game starts; a detective with no valid moves is automatically skipped.
 
 The round counter increments after all detectives have moved (or been skipped).
 
 ### 2.5 Reveal Rounds
 
-At the **start** of Mr X's turn on rounds **2, 8, 13, 18, 24**, Mr X's current node is broadcast to all detectives. The node appears in `mrXLog` for that round and in the detective-view `PlayerDTO`.
+On rounds **2, 8, 13, 18, 24**, the node Mr X ends his move on is revealed: it is written into that round's final `mrXLog` entry, and detectives see it as Mr X's `nodeId` until the round ends.
 
 ### 2.6 Double Move
 
-Mr X declares a double move by including `DOUBLE` as the ticket in their first move submission. This consumes one `DOUBLE` ticket and places Mr X in a "double move" sub-state:
+Mr X plays a double move by putting `DOUBLE_` in front of the first leg's ticket:
 
-1. First move: Mr X submits `{toNodeId, ticket: DOUBLE}`. Server deducts one DOUBLE ticket and prompts for the second move.
-2. Second move: Mr X submits `{toNodeId, ticket: <ESCOOTER|BUS|TRAIN|FERRY|BLACK>}` for the second leg.
+1. First leg: `{toNodeId, ticket: "DOUBLE_<ESCOOTER|BUS|TRAIN|FERRY|BLACK>"}`. The server spends one DOUBLE ticket plus the named ticket, and it stays Mr X's turn (`mrXDoubleMovePending: true`).
+2. Second leg: `{toNodeId, ticket: "<ESCOOTER|BUS|TRAIN|FERRY|BLACK>"}`.
 
-Both moves occur before any detective moves. Detectives see two `MrXLogEntry` rows for that round — each showing the ticket type used (or `BLACK`). Neither log entry reveals Mr X's position unless the round is a reveal round, in which case the final destination after the second move is revealed.
-
-The `isDoubleFirst` flag on `MrXLogEntry` distinguishes the first leg from the second.
+A bare `DOUBLE` ticket is rejected, and so is a second `DOUBLE_...` while a double is pending. Both legs happen before any detective moves and are logged as two `mrXLog` entries for the same round; the first has `doubleMove: true`. On a reveal round only the second leg's node is revealed.
 
 ### 2.7 Invisible Ticket
 
@@ -95,9 +93,11 @@ Detectives see the Invisible ticket (`BLACK`) in the log. The actual destination
 
 | Outcome | Condition |
 |---|---|
-| Detectives win | Any detective's move ends on Mr X's node (caught) |
+| Detectives win | A detective's move ends on Mr X's node (caught), or Mr X has no legal move when his turn starts (boxed in) |
 | Mr X wins | Round 24 completes with Mr X not caught |
-| Game aborted | A player disconnects and the grace period expires without reconnection |
+| Game aborted | Any player leaves a game in progress, or the current player makes no move for `game.turn-timer-seconds` (15 minutes). `winner` stays null and `abortReason` says why. |
+
+In the lobby, a non-host player who leaves is simply removed; the host leaving closes the lobby for everyone (`phase: ENDED`, `abortReason: "The host left the game"`).
 
 ### 2.9 Movement Constraints
 
@@ -178,96 +178,45 @@ Browser (Vue.js + Pinia + MapLibre GL)
 
 ### 5.1 Server-side Java
 
+The rules live in plain Java in `backend/src/main/java/com/huntingmrxwellington/game/`, with no Spring:
+
 ```
-GameSession
-  String id                          // UUID
-  String joinCode                    // 6-char uppercase, e.g. "WXYZ12"
-  GamePhase phase                    // LOBBY | IN_PROGRESS | PAUSED | ENDED
-  int round                          // 1–24
-  TurnPhase turnPhase                // MR_X_TURN | DETECTIVE_TURN
-  boolean mrXDoubleMovePending       // true between first and second double-move leg
-  List<Player> players               // in join order
-  int currentDetectiveIndex          // index into players (detectives only) for whose detective turn it is
-  int mrXNodeId                      // authoritative position, never sent to detectives
-  List<MrXLogEntry> mrXLog
-  Instant pausedAt                   // set on disconnect
-  String disconnectedPlayerId        // player currently in grace period
-  String winner                      // null | "MR_X" | "DETECTIVES" | "ABORTED"
+Game
+  String id, joinCode
+  GamePhase phase                    // LOBBY | IN_PROGRESS | ENDED
+  int round                          // 0 in the lobby, then 1–24
+  TurnPhase turnPhase                // MR_X_TURN | DETECTIVE_TURN; null outside IN_PROGRESS
+  Player current                     // whose move it is; null outside IN_PROGRESS
+  boolean doubleMovePending          // between the two legs of a double move
+  List<Player> players               // lobby: join order (host first); in play: Mr X first, then detectives in turn order
+  List<MrXMove> mrXLog
+  Winner winner                      // null | MR_X | DETECTIVES
+  String abortReason                 // set when a player leaves or the idle limit passes
 
 Player
-  String id                          // UUID, assigned on join
+  String id                          // public, sent to everyone
+  String token                       // secret, only ever sent to this player at create/join
   String name
-  Role role                          // MR_X | DETECTIVE
-  int nodeId
+  Role role                          // null in the lobby
+  Integer node                       // null in the lobby
   Map<TicketType, Integer> tickets   // -1 = unlimited
 
-MrXLogEntry
-  int round
-  int leg                            // 1 (normal) | 1 or 2 (double move)
+MrXMove (record)
+  int round, int leg                 // leg 2 is the second leg of a double
   TicketType ticketUsed              // ESCOOTER | BUS | TRAIN | FERRY | BLACK
-  Integer nodeId                     // null unless reveal round AND this is the final leg
-
-TicketType   (enum)  ESCOOTER | BUS | TRAIN | FERRY | BLACK | DOUBLE
-GamePhase    (enum)  LOBBY | IN_PROGRESS | PAUSED | ENDED
-TurnPhase    (enum)  MR_X_TURN | DETECTIVE_TURN
-Role         (enum)  MR_X | DETECTIVE
+  Integer nodeId                     // null unless reveal round AND final leg
+  boolean doubleMove                 // true on the first leg of a double
 ```
 
-### 5.2 Client-facing DTOs (JSON)
+### 5.2 Client-facing views (JSON)
 
-The server sends **role-filtered snapshots** — Mr X's position is withheld from detectives on non-reveal rounds.
-
-```
-GameStateDTO
-  gameId          String
-  joinCode        String
-  phase           String           // "LOBBY" | "IN_PROGRESS" | "PAUSED" | "ENDED"
-  round           int
-  turnPhase       String           // "MR_X_TURN" | "DETECTIVE_TURN"
-  currentPlayerId String           // playerId whose turn it is
-  players         PlayerDTO[]
-  mrXLog          MrXLogEntryDTO[]
-  winner          String | null    // "MR_X" | "DETECTIVES" | "ABORTED" | null
-
-PlayerDTO
-  id       String
-  name     String
-  role     String                  // "MR_X" | "DETECTIVE"
-  nodeId   number | null           // Mr X: null in detective view on non-reveal rounds
-  tickets  { [ticketType]: number } // Mr X unlimited tickets shown as -1
-
-MrXLogEntryDTO
-  round       int
-  leg         int
-  ticketUsed  String               // "ESCOOTER" | "BUS" | "TRAIN" | "FERRY" | "BLACK"
-  nodeId      number | null        // null on non-reveal rounds
-
-MoveRequestDTO  (client → server, REST body)
-  playerId   String
-  toNodeId   number
-  ticket     String               // ticket type used
-
-ValidMovesDTO  (server → client)
-  moves  Array<{ nodeId: number, modes: String[] }>
-```
+`GameState`, `PlayerView`, `MrXMove` and `ValidMove` are defined in `documentation/openapi.yaml` (components/schemas). `Game.viewFor` builds each view per viewer, and none of them carries a player token.
 
 ---
 
 ## 6. REST API
 
-Base path: `/api`
-
-All error responses: `400 Bad Request` with body `{ "error": "<message>" }`.
-
-| Method | Path | Request body | Response | Description |
-|---|---|---|---|---|
-| `POST` | `/api/games` | `{ "hostName": String }` | `GameStateDTO` | Create a new game; host is assigned `MR_X` role by default (reassigned on start) |
-| `POST` | `/api/games/{id}/join` | `{ "joinCode": String, "playerName": String }` | `{ "playerId": String, "gameState": GameStateDTO }` | Join an existing LOBBY game |
-| `POST` | `/api/games/{id}/start` | `{ "playerId": String }` | `GameStateDTO` | Start the game (host only, ≥2 players required); server assigns roles and starting nodes |
-| `GET` | `/api/games/{id}/valid-moves?playerId={pid}` | — | `ValidMovesDTO` | Returns reachable nodes for the given player on their turn |
-| `POST` | `/api/games/{id}/moves` | `MoveRequestDTO` | `GameStateDTO` | Submit a move; server validates, applies, and broadcasts updated state via WebSocket |
-
-`POST /api/games/{id}/start` randomly assigns one player as Mr X and the rest as detectives. The host does not have a guaranteed role.
+`documentation/openapi.yaml` has the full contract. In short: create and join return `{playerId, playerToken, gameState}`; every call that acts as a player (start, leave or kick, valid moves, move) sends the token in the `X-Player-Token` header; errors are `{ "error": "<message>" }` with status 400, 403, 404 or 409.
 
 ---
 
@@ -279,27 +228,25 @@ Endpoint: `/ws` (SockJS). Clients connect using the `@stomp/stompjs` + `sockjs-c
 
 ### 7.2 Server → Client Subscriptions
 
-Because Mr X's position must be hidden from detectives, **each player subscribes to their own channel** rather than a shared game topic:
-
 | Destination | Payload | Sent when |
 |---|---|---|
-| `/topic/games/{gameId}/players/{playerId}` | `GameStateDTO` (role-filtered) | After every state change: join, start, move, disconnect, reconnect, end |
-| `/topic/games/{gameId}/players/{playerId}/valid-moves` | `ValidMovesDTO` | At the start of this player's turn |
-| `/topic/games/{gameId}/players/{playerId}/error` | `{ "message": String }` | Move rejected or other per-player error |
+| `/topic/games/{gameId}` | `GameState` (public view) | After every change |
+| `/topic/games/{gameId}/players/{playerToken}` | `GameState` (this player's view) | After every change |
+| `/topic/games/{gameId}/players/{playerToken}/valid-moves` | `ValidMove[]` | After every change, to the player whose turn it is |
 
-The server uses `SimpMessagingTemplate.convertAndSendToUser()` targeting each player's session ID.
+Private topics are named by the secret token, and the broker only matches exact destinations, so another client can't subscribe to them; wildcard subscriptions receive nothing.
 
 ### 7.3 Client → Server
 
-All game actions go through **REST** (`POST /api/games/{id}/moves`). WebSocket is receive-only for clients. This simplifies auth and error handling.
+All game actions go through **REST**. WebSocket is receive-only for clients: the server drops any SEND frame a client sends.
 
 ### 7.4 Role Filtering Rules
 
-When building the `GameStateDTO` for a given player:
+When building the view for a given player:
 
-- **Detective view of Mr X's `PlayerDTO.nodeId`**: `null` unless the current round is a reveal round **and** Mr X's turn for this round has already completed.
-- **Detective view of `mrXLog[i].nodeId`**: `null` unless `mrXLog[i]` is from a reveal round.
-- **Mr X view**: full state, including own `nodeId` and all detective `nodeId`s.
+- **Detective or public view of Mr X's `nodeId`**: `null` unless the current round is a reveal round **and** Mr X has made his move this round.
+- **`mrXLog[i].nodeId`**: `null` unless `mrXLog[i]` is the final leg of a reveal round (the same for everyone, Mr X included).
+- **Mr X view**: full state, including his own `nodeId` and every detective's.
 
 ---
 
@@ -418,10 +365,9 @@ Two sequential phases on the same route, controlled by local component state.
 - Current round and whose turn it is.
 - Each player's name, role icon, and remaining ticket counts.
 - Mr X travel log (for detectives: ticket types only; nodeId shown on reveal rounds).
-- Pause/disconnection banner when `phase === "PAUSED"`.
 
 **Mr X double-move UX:**
-- After selecting `DOUBLE` as the ticket type for the first leg, the server responds with a `GameStateDTO` where `mrXDoubleMovePending = true`.
+- After Mr X picks a double move and a ticket for the first leg (sent as `DOUBLE_<ticket>`), the server responds with a state where `mrXDoubleMovePending = true`.
 - The UI shows a "Select your second move" banner and re-highlights reachable nodes from Mr X's new position.
 
 **Marker rendering:**
@@ -457,18 +403,11 @@ Structure (top → bottom, centred):
 
 ---
 
-## 10. Disconnection Handling
+## 10. Leaving, Idling and Disconnects
 
-Based on `documentation/plans/states-diagrams.md`:
-
-1. Server detects WebSocket session close for `playerId`.
-2. Game transitions to `phase: PAUSED`. `pausedAt` and `disconnectedPlayerId` are set.
-3. A grace period timer starts (configurable: `game.grace-period-seconds`, default 60).
-4. Server broadcasts `GameStateDTO` with `phase: "PAUSED"` to all remaining players.
-5. **If the player reconnects** within the grace period: they re-subscribe to their per-player topic and receive the current `GameStateDTO`. Game resumes from where it stopped — the turn timer is reset.
-6. **If the grace period expires**: game transitions to `phase: ENDED`, `winner: "ABORTED"`. Final state broadcast to all remaining players.
-
-Turn timer: a per-turn server-side timer (configurable: `game.turn-timer-seconds`, default 120). On expiry the server auto-skips the current player's move and advances the turn. The skipped move is logged as `{ticket: null}` in `mrXLog` (Mr X) or simply skipped (detective).
+- **A dropped WebSocket doesn't end or pause the game.** User testing showed connections drop often, so there is no pause and no grace period. Clients reconnect automatically (STOMP), re-sync over REST on every reconnect, and poll `GET /api/games/{id}` every 6 s as a fallback.
+- **Leaving:** any player leaving a game in progress ends it for everyone (`phase: ENDED`, `abortReason` names who left). In the lobby a non-host who leaves is removed; the host leaving closes the lobby for everyone.
+- **Idle limit:** every 30 s the server checks each game in progress. If the current player hasn't moved for `game.turn-timer-seconds` (900 s by default), the game ends with `abortReason: "A player exceeded the 15-minute turn limit"`. There is no auto-skip.
 
 ---
 

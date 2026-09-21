@@ -41,7 +41,7 @@ npm run preview   # Vite's built-in preview server
 src/
   api/          gameApi.ts — fetch wrappers for all REST calls
   router/       index.ts   — Vue Router routes
-  stores/       gameStore.ts — Pinia store (gameId, playerId, gameState)
+  stores/       gameStore.ts — Pinia store (gameId, playerId, playerToken, gameState)
   types/        game.ts    — TypeScript interfaces matching backend DTOs
   views/        LandingView, CreateGameView, JoinGameView, GameBoardView
   main.ts       app entry point
@@ -59,4 +59,4 @@ src/
 
 ## Session persistence
 
-`gameId` and `playerId` are stored in `sessionStorage` so a page refresh does not lose context. The Pinia store re-hydrates from `sessionStorage` on load.
+`gameId`, `playerId` and `playerToken` are stored in `sessionStorage` so a page refresh does not lose context. The Pinia store re-hydrates from `sessionStorage` on load. `playerToken` is the player's secret: `gameApi.ts` sends it as the `X-Player-Token` header on every call that acts as the player, and the private STOMP topics are named by it.

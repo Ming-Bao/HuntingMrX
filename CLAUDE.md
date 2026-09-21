@@ -40,17 +40,19 @@ GOOGLE_MAPS_API_KEY=your_key_here
 
 Documented in `documentation/plans/states-diagrams.md`:
 
-- **Game phases**: `Idle → Lobby → InProgress → (Paused | DetectivesWin | MrXWins | GameAborted)`
+- **Game phases**: `Idle → Lobby → InProgress → (DetectivesWin | MrXWins | GameAborted)`; a lobby also closes (`ENDED`) when its host leaves
 - **InProgress sub-phases**: `MrXTurn → DetectiveTurn → RoundEnd → MrXTurn` (cycles 24 rounds)
-- **Disconnection handling**: `InProgress → Paused` on any disconnect; reconnect within grace period resumes, otherwise `GameAborted`
-- **Mr X turn flow**: reveal check (rounds 2, 8, 13, 18, 24) → fetch valid moves → select node + ticket → optional double-ticket second move → server validates → broadcast
-- **Detective turn flow**: fetch valid moves → select node + ticket → submit → server catch-check → advance to next detective or increment round
+- **Leaving and idling**: any player leaving a game in progress aborts it for everyone, and the server aborts a game whose current player hasn't moved for `game.turn-timer-seconds` (900 s). A dropped WebSocket is *not* leaving: clients reconnect and re-sync over REST, and nothing pauses.
+- **Mr X turn flow**: boxed-in check (no legal move means the detectives win) → fetch valid moves → select node + ticket → optional double (first leg sent as `DOUBLE_<ticket>`) → server validates → broadcast; on rounds 2, 8, 13, 18, 24 the node he ends on is revealed
+- **Detective turn flow**: fetch valid moves → select node + ticket → submit → server catch-check → advance to the next detective (skipping any with no legal move) or increment round
 
 ## Key Design Decisions
 
 - **Map library**: Decided — MapLibre GL, wired into the frontend (`frontend/package.json`). Chosen after benchmarking against Google Maps and Leaflet (see `documentation/test_map_api/`).
 - **Routing**: GeoJSON pre-computed paths preferred over live routing APIs — APIs are too expensive per-request and too slow for hundreds of node-to-node edges.
-- **Turn timers**: Server-side auto-skip on `TurnTimerExpired` so gameplay advances even if a player is idle.
+- **Turn timers**: no auto-skip. The server aborts a game whose current player has been idle for `game.turn-timer-seconds` (900 s). Pause-on-disconnect with a grace period was dropped because user-testing networks dropped WebSockets too often.
+- **Player tokens**: create/join return a public `playerId` and a secret `playerToken`. Every call that acts as a player sends the token in `X-Player-Token`, and private STOMP topics are named by it; the public id grants nothing. The STOMP broker matches exact destinations only and drops client SEND frames, so nobody can listen in on another player's topic.
+- **Rules core**: every game rule lives in plain Java in `backend/src/main/java/com/huntingmrxwellington/game/` (`Game`, `Player`, `MapGraph`) with no Spring, so it's unit-tested directly. `GameService` only stores games, locks, checks tokens and publishes.
 
 ## OpenAPI Spec — MANDATORY SYNC RULE
 
@@ -86,9 +88,10 @@ Do **not** skip this step even for small changes. The OpenAPI file is the single
 - `documentation/test_map_api/` — map library benchmarks, timing results, per-library notes
 - `documentation/project_proposal/` — original proposal (LaTeX source + PDFs)
 - `documentation/spec.md` — living spec
+- `documentation/backend-fixes.md`: bugs found in the 2026-09-21 backend review, with cause, fix, regression test and status
 - `backend/doc.md` — backend setup/run guide (lives next to the code it documents, not under `documentation/`)
 - `frontend/doc.md` — frontend setup/run guide (same reasoning)
 
-## Planned Evaluation Methods
+## Evaluation Methods
 
-Unit, mock, lifecycle, integration, functional, performance testing of game logic and multiplayer sync; user evaluation via SUS questionnaire. Meta-testing: coverage, mutation, fuzz, and property-based testing.
+Unit, mock, lifecycle, integration, functional, property-based/fuzz and performance tests live in `backend/src/test`; the table in `backend/doc.md` maps each category to its classes. Coverage (JaCoCo) runs with every `mvn test`, mutation testing (PIT) on demand, and the latency test is opt-in. User evaluation used the SUS questionnaire. The frontend has no automated tests.

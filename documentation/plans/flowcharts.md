@@ -7,19 +7,26 @@ stateDiagram-v2
 
     [*] --> Lobby
     Lobby --> Setup
+    Lobby --> Closed : host left
     Setup --> MrXTurn
 
-	MrXTurn --> DetectiveTurn
-	DetectiveTurn --> CatchCheck
-	
-	CatchCheck --> DetectivesWin : on Mr. X node
-	CatchCheck --> TurnCheck
-    
+    MrXTurn --> DetectivesWin : Mr. X has no legal move
+    MrXTurn --> DetectiveTurn
+    DetectiveTurn --> CatchCheck
+
+    CatchCheck --> DetectivesWin : on Mr. X node
+    CatchCheck --> TurnCheck
+
     TurnCheck --> MrXWins : final round reached
     TurnCheck --> MrXTurn : final round not reached
-	
+
+    MrXTurn --> Aborted : player left or 15 min idle
+    DetectiveTurn --> Aborted : player left or 15 min idle
+
     DetectivesWin --> [*]
     MrXWins --> [*]
+    Aborted --> [*]
+    Closed --> [*]
 ```
 
 ---
@@ -28,10 +35,9 @@ stateDiagram-v2
 
 ``` mermaid
 flowchart TD
-    A([Mr. X turn starts]) --> R{Reveal round?\nrounds 3,8,13,18,24}
-    R -- yes --> RA[Broadcast position to detectives]
-    R -- no --> B
-    RA --> B[Fetch valid moves]
+    A([Mr. X turn starts]) --> X{Any legal move?}
+    X -- no, boxed in --> XW([Detectives win!])
+    X -- yes --> B[Fetch valid moves]
     B --> C{Response ok?}
     C -- error --> B2[Show error, retry]
     B2 --> B
@@ -41,12 +47,16 @@ flowchart TD
     F -- no valid ticket --> E
     F -- ticket available --> G[Use ticket]
     G --> H{Double ticket?}
-    H -- yes, first move --> E
+    H -- yes, first leg --> I1[Submit DOUBLE_ticket leg]
+    I1 --> E
     H -- no --> I[Submit move]
     I --> J{Server validates}
     J -- invalid --> E
     J -- valid --> K[Decrement ticket in server state]
-    K --> L([Advance to Detective turn])
+    K --> R{Reveal round?\nrounds 2,8,13,18,24}
+    R -- yes --> RA[Log and show position to detectives]
+    R -- no --> L
+    RA --> L([Advance to Detective turn])
 ```
 
 ---

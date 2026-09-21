@@ -29,14 +29,14 @@ Movement runs on four transport modes, each tied to a ticket and a colour on the
 | Train | `TRAIN` |
 | Ferry | `FERRY` |
 
-A move needs a ticket matching the mode of the edge being crossed. Detectives hold a fixed budget per game (10 escooter / 8 bus / 4 train / 2 ferry, configurable) and never get more — spend them badly and you're stuck. Mr X never runs out of the four regular tickets, but also holds a small number of two special ones:
+A move needs a ticket matching the mode of the edge being crossed. Detectives hold a fixed budget per game (12 escooter / 8 bus / 6 train / 2 ferry, configurable) and never get more — spend them badly and you're stuck. Mr X never runs out of the four regular tickets, but also holds a small number of two special ones:
 
-- **`INVISIBLE`** — travel any edge, any mode, no matching ticket required. Detectives see that an invisible ticket was used, never which mode it disguised.
+- **Invisible** (`BLACK`) — travel any edge, any mode, no matching ticket required. Detectives see that an invisible ticket was used, never which mode it disguised.
 - **`DOUBLE`** — take two moves in one turn before any detective responds. Rare (2 per game) and the only way to put real distance between two reveals.
 
-**Reveal rounds** are fixed: 3, 8, 13, 18, 24. At the start of Mr X's turn on those rounds, his node is broadcast to every detective and logged. Between reveals he's a ticket trail and nothing else.
+**Reveal rounds** are fixed: 2, 8, 13, 18, 24. On those rounds, the node Mr X ends his move on is shown to every detective and logged. Between reveals he's a ticket trail and nothing else.
 
-**The game ends** the instant a detective's move lands on Mr X's node — detectives win. If round 24 completes with Mr X still free, he wins. A disconnect that doesn't reconnect within the grace period aborts the game for everyone.
+**The game ends** the instant a detective's move lands on Mr X's node — detectives win. They also win if Mr X can't move when his turn starts because they hold every node next to him. If round 24 completes with Mr X still free, he wins. If any player leaves, or the player whose turn it is doesn't move for 15 minutes, the game is aborted for everyone; a dropped connection on its own doesn't end it.
 
 Full mechanical detail — turn ordering, movement constraints, double-move sequencing — lives in [`documentation/spec.md`](documentation/spec.md).
 
@@ -85,7 +85,7 @@ npm install
 npm run dev
 ```
 
-Game settings — turn timer, disconnect grace period, detective ticket budgets, which map file to load — are in `backend/src/main/resources/application.properties`. By default the backend loads the full 261-node Wellington map (`map.json`); a 5-node `test-map.json` is also bundled for fast manual testing.
+Game settings (the idle turn limit, detective ticket budgets, which map file to load) are in `backend/src/main/resources/application.properties`. By default the backend loads the full 216-node Wellington map (`map.json`); a 5-node `test-map.json` is also bundled for fast manual testing.
 
 To regenerate or edit the map itself, see `mapCreator/` — a standalone HTML tool for placing nodes/edges on Wellington, plus a headless Selenium harness (`mapCreator/headless/`) for scripted generation and quality evaluation.
 
@@ -95,11 +95,12 @@ To regenerate or edit the map itself, see `mapCreator/` — a standalone HTML to
 
 ```bash
 cd backend
-mvn test              # unit + lifecycle tests
-mvn test -Dtest=FullGameE2ETest   # end-to-end, drives the real API over HTTP via a headless Firefox
+mvn test                                                   # all tests except the latency test; coverage report in target/site/jacoco/
+mvn test -Dgroups=perf -DexcludedGroups=                   # multiplayer latency test only
+mvn test-compile org.pitest:pitest-maven:mutationCoverage  # mutation testing; report in target/pit-reports/
 ```
 
-The end-to-end suite requires Firefox and `geckodriver` on the host — see [`backend/doc.md`](backend/doc.md) for setup. Set `-De2e.headless=false` to watch the browser drive the game instead of running it headless.
+The suite covers unit, mock, lifecycle, integration (HTTP and STOMP), full-game functional, property-based and fuzz tests; [`backend/doc.md`](backend/doc.md) lists which class does what. No browser or driver is needed.
 
 ---
 

@@ -1,6 +1,6 @@
 ### Overview
 
-Game-level phases with disconnection handling. A player going missing pauses the game in **Paused**; if they reconnect in time play resumes, otherwise the game aborts.
+Game-level phases. A game in progress ends when the detectives catch Mr X or box him in, when Mr X survives round 24, or when it's aborted because a player left or the current player went 15 minutes without moving. A dropped WebSocket doesn't pause anything: clients reconnect and re-sync over REST.
 
 ```mermaid
 stateDiagram-v2
@@ -9,6 +9,7 @@ stateDiagram-v2
     [*] --> Idle
     Idle --> Lobby : GameCreated
     Lobby --> InProgress : GameStarted
+    Lobby --> LobbyClosed : HostLeft
 
     state InProgress {
         [*] --> MrXTurn
@@ -17,33 +18,31 @@ stateDiagram-v2
         RoundEnd --> MrXTurn : NextRound
     }
 
-    InProgress --> Paused : PlayerDisconnected
-    Paused --> InProgress : ReconnectedInTime
-    Paused --> GameAborted : GracePeriodExpired
-
     InProgress --> DetectivesWin : Caught
+    InProgress --> DetectivesWin : MrXBoxedIn
     InProgress --> MrXWins : Round24Reached
+    InProgress --> GameAborted : PlayerLeft
+    InProgress --> GameAborted : TurnIdle15Min
 
     DetectivesWin --> [*]
     MrXWins --> [*]
     GameAborted --> [*]
+    LobbyClosed --> [*]
 ```
 
 ---
 
 ### Mr X states
 
-**AwaitingMove** tracks whether Mr X is actively engaged or idle. A turn timer expiry auto-skips the move server-side. Network errors enter a reconnection loop before either resuming or disconnecting.
+His turn starts with a check that he can move at all: if detectives hold every neighbouring node, the detectives win. **AwaitingMove** tracks whether he's active or idle; after 15 minutes without a move the server aborts the game. Network errors enter the client's reconnect loop (STOMP retries indefinitely, and the client re-syncs over REST every 6 s).
 
 ```mermaid
 stateDiagram-v2
     direction TB
 
-    [*] --> CheckingReveal
-    CheckingReveal --> Hidden : RoundNotRevealed
-    CheckingReveal --> Revealed : RoundRevealed
-    Hidden --> AwaitingMove : RevealCheckComplete
-    Revealed --> AwaitingMove : RevealCheckComplete
+    [*] --> CheckingBoxedIn
+    CheckingBoxedIn --> DetectivesWin : NoLegalMove
+    CheckingBoxedIn --> AwaitingMove : HasLegalMove
 
     state AwaitingMove {
         [*] --> Active
@@ -52,27 +51,29 @@ stateDiagram-v2
     }
 
     AwaitingMove --> ValidatingMove : MoveSubmitted
-    AwaitingMove --> AutoSkipped : TurnTimerExpired
+    AwaitingMove --> GameAborted : TurnIdle15Min
     AwaitingMove --> Reconnecting : NetworkError
     Reconnecting --> AwaitingMove : ReconnectSuccess
-    Reconnecting --> Disconnected : MaxRetriesExceeded
-    Disconnected --> [*]
 
     ValidatingMove --> AwaitingMove : MoveInvalid
     ValidatingMove --> ApplyingSingleMove : MoveValidSingle
     ValidatingMove --> ApplyingDoubleMove : MoveValidDouble
-    ApplyingSingleMove --> BroadcastingTransport : MoveApplied
-    ApplyingDoubleMove --> AwaitingMove : FirstMoveApplied
-    ApplyingDoubleMove --> BroadcastingTransport : SecondMoveApplied
-    BroadcastingTransport --> [*] : MoveComplete
-    AutoSkipped --> [*] : MoveComplete
+    ApplyingSingleMove --> Logging : MoveApplied
+    ApplyingDoubleMove --> AwaitingMove : FirstLegApplied
+    ApplyingDoubleMove --> Logging : SecondLegApplied
+    Logging --> Revealed : RevealRound
+    Logging --> Hidden : OtherRound
+    Revealed --> [*] : MoveComplete
+    Hidden --> [*] : MoveComplete
+    DetectivesWin --> [*]
+    GameAborted --> [*]
 ```
 
 ---
 
 ### Detective states
 
-Same active/idle tracking and error paths as Mr X. **AutoSkipped** feeds into the normal **Skipped** path so the turn-rotation logic stays consistent regardless of how a detective's turn ended.
+Same active/idle tracking, idle limit and reconnect path as Mr X. A detective with no legal move is skipped without spending a ticket.
 
 ```mermaid
 stateDiagram-v2
@@ -88,19 +89,17 @@ stateDiagram-v2
 
     AwaitingDetMove --> ValidatingMove : MoveSubmitted
     AwaitingDetMove --> Skipped : NoValidMoves
-    AwaitingDetMove --> AutoSkipped : TurnTimerExpired
+    AwaitingDetMove --> GameAborted : TurnIdle15Min
     AwaitingDetMove --> Reconnecting : NetworkError
     Reconnecting --> AwaitingDetMove : ReconnectSuccess
-    Reconnecting --> Disconnected : MaxRetriesExceeded
-    Disconnected --> [*]
 
     ValidatingMove --> AwaitingDetMove : MoveInvalid
     ValidatingMove --> ApplyingMove : MoveValid
     ApplyingMove --> CheckingCatch : MoveApplied
     CheckingCatch --> DetectivesWin : Caught
     CheckingCatch --> Skipped : NotCaught
-    AutoSkipped --> Skipped : ServerSkipsPlayer
     Skipped --> AwaitingDetMove : NextDetective
     Skipped --> [*] : AllDetectivesMoved
     DetectivesWin --> [*]
+    GameAborted --> [*]
 ```

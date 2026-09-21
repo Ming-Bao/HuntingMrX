@@ -4,27 +4,20 @@
 
 ```plantuml
 @startuml
-
 skinparam classAttributeIconSize 0
 
 class GameController <<Controller>>
+class MapController <<Controller>>
 class GameService <<Service>>
-class GameRepository <<Repository>>
-class GameSession <<Entity>>
-interface Player
-class LobbyPlayer
-class MrXPlayer
-class DetectivePlayer
+class Game
+class Player
+class MapGraph
 
 GameController --> GameService : delegates
-GameService  --> GameRepository : reads / writes
-GameRepository "1" --> "0..*" GameSession : stores
-GameSession "1" *-- "0..*" Player : players
-
-Player <|-- LobbyPlayer
-Player <|-- MrXPlayer
-Player <|-- DetectivePlayer
-
+MapController --> MapGraph : serves JSON
+GameService "1" --> "0..*" Game : stores (in memory)
+Game "1" *-- "1..6" Player : players
+Game --> MapGraph : board
 @enduml
 ```
 
@@ -32,7 +25,6 @@ Player <|-- DetectivePlayer
 
 ```plantuml
 @startuml
-
 skinparam classAttributeIconSize 0
 
 ' ── Enumerations ──────────────────────────────────────────────────────
@@ -40,7 +32,6 @@ skinparam classAttributeIconSize 0
 enum GamePhase {
     LOBBY
     IN_PROGRESS
-    PAUSED
     ENDED
 }
 
@@ -54,6 +45,11 @@ enum Role {
     DETECTIVE
 }
 
+enum Winner {
+    MR_X
+    DETECTIVES
+}
+
 enum TicketType {
     ESCOOTER
     BUS
@@ -63,196 +59,133 @@ enum TicketType {
     DOUBLE
 }
 
-' ── Player hierarchy ──────────────────────────────────────────────────
+' ── Rules core (package game, no Spring) ──────────────────────────────
 
-interface Player {
-    + getId() : String
-    + getName() : String
-    + getRole() : Role
-    + getNodeId() : Integer
-    + setNodeId(nodeId : Integer) : void
-    + getTickets() : Map<TicketType, Integer>
-    + getTicket(type : TicketType) : Integer
-    + useTicket(type : TicketType) : void
-}
-
-class LobbyPlayer {
+class Player {
     - id : String
+    - token : String
     - name : String
-    - nodeId : Integer
-    --
-    + LobbyPlayer(id : String, name : String)
-    + getRole() : Role
-    + getTickets() : Map<TicketType, Integer>
-    + getTicket(type : TicketType) : Integer
-    + useTicket(type : TicketType) : void
-}
-
-class MrXPlayer {
-    - id : String
-    - name : String
-    - nodeId : Integer
+    - role : Role
+    - node : Integer
     - tickets : Map<TicketType, Integer>
     --
-    + MrXPlayer(id : String, name : String, detectiveCount : int)
-    + getRole() : Role
-    + getTickets() : Map<TicketType, Integer>
-    + getTicket(type : TicketType) : Integer
-    + useTicket(type : TicketType) : void
+    + has(ticket : TicketType) : boolean
+    ~ assign(role : Role, node : int, tickets : Map) : void
+    ~ moveTo(node : int) : void
+    ~ spend(ticket : TicketType) : void
 }
 
-class DetectivePlayer {
-    - id : String
-    - name : String
-    - nodeId : Integer
-    - tickets : Map<TicketType, Integer>
+class MapGraph {
+    - json : byte[]
+    - nodeIds : List<Integer>
+    - neighbours : Map<Integer, Map<Integer, Set<TicketType>>>
     --
-    + DetectivePlayer(id : String, name : String, escooter : int, bus : int, train : int, ferry : int)
-    + getRole() : Role
-    + getTickets() : Map<TicketType, Integer>
-    + getTicket(type : TicketType) : Integer
-    + useTicket(type : TicketType) : void
+    + {static} parse(json : byte[]) : MapGraph
+    + modesBetween(a : int, b : int) : Set<TicketType>
+    + validMoves(player : Player, blocked : Set<Integer>) : List<ValidMove>
 }
 
-Player <|-- LobbyPlayer
-Player <|-- MrXPlayer
-Player <|-- DetectivePlayer
+class Game {
+    - phase : GamePhase
+    - round : int
+    - turnPhase : TurnPhase
+    - current : Player
+    - doubleMovePending : boolean
+    - winner : Winner
+    - abortReason : String
+    - mrXLog : List<MrXMove>
+    --
+    + join(name : String) : Player
+    + start(requester : Player, rng : Random) : void
+    + validMoves(player : Player) : List<ValidMove>
+    + move(player : Player, to : int, ticket : String) : void
+    + leave(player : Player) : boolean
+    + kick(requester : Player, targetId : String) : void
+    + abortIfIdle(limit : Duration) : boolean
+    + viewFor(viewer : Player) : GameState
+    + playerByToken(token : String) : Optional<Player>
+}
+
+Game "1" *-- "1..6" Player : players
+Game --> MapGraph : board
+Game ..> GamePhase
+Game ..> TurnPhase
+Game ..> Winner
 Player ..> Role
 Player ..> TicketType
 
-' ── Domain model ──────────────────────────────────────────────────────
+' ── Views sent to clients (records in package game) ───────────────────
 
-class GameSession {
-    - id : String
-    - joinCode : String
-    - phase : GamePhase
-    - maxPlayers : int
-    - hostPlayerId : String
-    - players : List<Player>
-    - round : int
-    - turnPhase : TurnPhase
-    - currentPlayerId : String
-    - winner : String
-    - abortReason : String
+class GameState <<record>> {
+    gameId, joinCode, phase, maxPlayers, players,
+    round, turnPhase, currentPlayerId, winner,
+    abortReason, mrXLog, mrXDoubleMovePending
 }
 
-GameSession "1" *-- "0..*" Player : players
-GameSession ..> GamePhase
-GameSession ..> TurnPhase
-
-' ── DTOs ──────────────────────────────────────────────────────────────
-
-class GameStateDTO {
-    - gameId : String
-    - joinCode : String
-    - phase : GamePhase
-    - maxPlayers : int
-    - round : int
-    - turnPhase : TurnPhase
-    - currentPlayerId : String
-    - winner : String
-    - abortReason : String
-    - players : List<PlayerDTO>
+class PlayerView <<record>> {
+    id, name, role, nodeId, tickets
 }
 
-class PlayerDTO {
-    - id : String
-    - name : String
-    - role : Role
-    - nodeId : Integer
-    - tickets : Map<TicketType, Integer>
+class MrXMove <<record>> {
+    round, leg, ticketUsed, nodeId, doubleMove
 }
 
-class CreateGameRequest {
-    - hostName : String
-    - maxPlayers : int
+class ValidMove <<record>> {
+    nodeId, ticketOptions
 }
 
-class JoinGameRequest {
-    - joinCode : String
-    - playerName : String
+GameState "1" *-- "0..*" PlayerView : players
+GameState "1" *-- "0..*" MrXMove : mrXLog
+Game ..> GameState : builds per viewer
+
+' ── Spring layer ──────────────────────────────────────────────────────
+
+class GameSettings <<record>> {
+    mapFile, turnTimerSeconds,
+    detective ticket counts
 }
-
-class StartGameRequest {
-    - playerId : String
-}
-
-class RemovePlayerRequest {
-    - requesterId : String
-}
-
-class CreateResult <<record>> {
-    - playerId : String
-    - gameState : GameStateDTO
-}
-
-class JoinResult <<record>> {
-    - playerId : String
-    - gameState : GameStateDTO
-}
-
-GameStateDTO "1" *-- "0..*" PlayerDTO : players
-GameStateDTO ..> GamePhase
-GameStateDTO ..> TurnPhase
-PlayerDTO ..> Role
-PlayerDTO ..> TicketType
-CreateResult --> GameStateDTO
-JoinResult  --> GameStateDTO
-
-' ── Repository ────────────────────────────────────────────────────────
-
-class GameRepository <<Repository>> {
-    - store : ConcurrentHashMap<String, GameSession>
-    --
-    + save(session : GameSession) : GameSession
-    + findById(id : String) : Optional<GameSession>
-    + findByJoinCode(code : String) : Optional<GameSession>
-    + delete(id : String) : void
-}
-
-GameRepository "1" --> "0..*" GameSession : stores
-
-' ── Service ───────────────────────────────────────────────────────────
 
 class GameService <<Service>> {
-    - escooterTickets : int
-    - busTickets : int
-    - trainTickets : int
-    - ferryTickets : int
+    - games : ConcurrentHashMap<String, Game>
     --
-    + createGame(hostName : String, maxPlayers : int) : CreateResult
-    + joinGame(joinCode : String, playerName : String) : JoinResult
-    + getGame(gameId : String) : GameStateDTO
-    + startGame(gameId : String, playerId : String) : GameStateDTO
-    + leaveGame(gameId : String, playerId : String) : void
-    + kickPlayer(gameId : String, hostId : String, targetPlayerId : String) : void
+    + createGame(hostName : String, maxPlayers : int) : JoinResponse
+    + joinGame(joinCode : String, playerName : String) : JoinResponse
+    + getGame(gameId : String, token : String) : GameState
+    + startGame(gameId : String, token : String) : GameState
+    + removePlayer(gameId : String, token : String, targetPlayerId : String) : void
+    + validMoves(gameId : String, token : String) : List<ValidMove>
+    + submitMove(gameId : String, token : String, toNodeId : int, ticket : String) : GameState
+    + abortIdleGames() : void
+    - publish(game : Game) : void
 }
 
-GameService --> GameRepository : uses
-GameService ..> GameStateDTO : creates
-GameService ..> CreateResult : creates
-GameService ..> JoinResult : creates
-GameService ..> LobbyPlayer : instantiates
-GameService ..> MrXPlayer : instantiates
-GameService ..> DetectivePlayer : instantiates
-
-' ── Controller ────────────────────────────────────────────────────────
+class JoinResponse <<record>> {
+    playerId, playerToken, gameState
+}
 
 class GameController <<Controller>> {
-    - gameService : GameService
-    --
-    + createGame(req : CreateGameRequest) : ResponseEntity
-    + joinGame(req : JoinGameRequest) : ResponseEntity
-    + getGame(id : String) : ResponseEntity
-    + startGame(id : String, req : StartGameRequest) : ResponseEntity
-    + removePlayer(id : String, targetPlayerId : String, req : RemovePlayerRequest) : ResponseEntity
+    + createGame(req) : JoinResponse
+    + joinGame(req) : JoinResponse
+    + getGame(id, token) : GameState
+    + startGame(id, token) : GameState
+    + removePlayer(id, targetPlayerId, token) : void
+    + getValidMoves(id, token) : List<ValidMove>
+    + submitMove(id, token, req) : GameState
 }
 
-GameController --> GameService : delegates
-GameController ..> CreateGameRequest : uses
-GameController ..> JoinGameRequest : uses
-GameController ..> StartGameRequest : uses
-GameController ..> RemovePlayerRequest : uses
+class MapController <<Controller>> {
+    + getMap() : byte[]
+}
 
+class WebSocketConfig <<Configuration>> {
+    exact-match subscriptions only
+    client SEND frames dropped
+}
+
+GameService "1" --> "0..*" Game : stores, locks
+GameService --> GameSettings
+GameService ..> JoinResponse : creates
+GameController --> GameService : delegates
+MapController --> MapGraph : serves JSON
 @enduml
 ```
