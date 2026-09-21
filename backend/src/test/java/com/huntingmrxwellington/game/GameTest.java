@@ -7,13 +7,16 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 
 import static com.huntingmrxwellington.game.TicketType.*;
 // Explicit AssertJ imports: Assertions.* also brings in a DOUBLE constant that clashes with TicketType.DOUBLE.
@@ -172,6 +175,39 @@ class GameTest {
             assertThat(g.players()).filteredOn(Player::isMrX).hasSize(1);
             assertThat(g.players()).filteredOn(p -> p.role() == Role.DETECTIVE).hasSize(5);
             assertThat(g.players().stream().map(Player::node).distinct()).hasSize(6);
+        }
+
+        @Test
+        void differentSeedsPickDifferentMrXAndStartNodes() {
+            Set<String> mrXNames = new HashSet<>();
+            Set<List<Integer>> nodeSets = new HashSet<>();
+            for (int seed = 1; seed <= 20; seed++) {
+                Game g = newGame(6);
+                Player host = g.join("P0");
+                for (int i = 1; i < 6; i++) g.join("P" + i);
+                g.start(host, new Random(seed));
+                g.players().stream().filter(Player::isMrX).forEach(p -> mrXNames.add(p.name()));
+                nodeSets.add(g.players().stream().map(Player::node).sorted().toList());
+            }
+            assertThat(mrXNames).hasSizeGreaterThan(1);    // not always the host
+            assertThat(nodeSets).hasSizeGreaterThan(1);    // not always the same nodes
+        }
+
+        @Test
+        void theMapNeedsANodeForEveryPlayer() {
+            MapGraph twoNodes = MapGraph.parse("""
+                    {"nodes": [{"id": 1}, {"id": 2}], "edges": [{"from": 1, "to": 2, "modes": ["BUS"]}]}"""
+                    .getBytes(StandardCharsets.UTF_8));
+            Game fits = new Game("g", "C", 3, twoNodes, TICKETS, () -> now);
+            Player host = fits.join("A");
+            fits.join("B");
+            assertThatCode(() -> fits.start(host, new Random(1))).doesNotThrowAnyException();
+            Game tooMany = new Game("g", "C", 3, twoNodes, TICKETS, () -> now);
+            Player tooManyHost = tooMany.join("A");
+            tooMany.join("B");
+            tooMany.join("C");
+            assertThatThrownBy(() -> tooMany.start(tooManyHost, new Random(1)))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("at least 3 nodes");
         }
 
         @Test
@@ -346,6 +382,13 @@ class GameTest {
         void detectivesBlockMrXButNotEachOther() {
             start(1, 2, 7);
             assertThat(game.validMoves(mrX)).extracting(ValidMove::nodeId).containsExactly(5);
+        }
+
+        @Test
+        void thereAreNoValidMovesBeforeTheStart() {
+            Game g = newGame(3);
+            Player host = g.join("Host");
+            assertThatThrownBy(() -> g.validMoves(host)).isInstanceOf(ConflictException.class);
         }
 
         @Test

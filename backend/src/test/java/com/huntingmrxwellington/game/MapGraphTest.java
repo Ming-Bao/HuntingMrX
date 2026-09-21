@@ -77,6 +77,16 @@ class MapGraphTest {
     }
 
     @Test
+    void validMovesAreSortedByNodeId() {
+        MapGraph g = parse("""
+                {"nodes": [{"id": 1}, {"id": 100}, {"id": 3}, {"id": 50}],
+                 "edges": [{"from": 1, "to": 100, "modes": ["BUS"]}, {"from": 1, "to": 3, "modes": ["BUS"]},
+                           {"from": 1, "to": 50, "modes": ["BUS"]}]}""");
+        Player p = placed(Role.DETECTIVE, 1, Map.of(BUS, 5));
+        assertThat(g.validMoves(p, Set.of())).extracting(ValidMove::nodeId).containsExactly(3, 50, 100);
+    }
+
+    @Test
     void theShippedMapsLoad() throws Exception {
         for (String file : List.of("map.json", "test-map.json")) {
             byte[] json = new ClassPathResource("static/" + file).getContentAsByteArray();

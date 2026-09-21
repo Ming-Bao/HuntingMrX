@@ -8,6 +8,8 @@ import com.huntingmrxwellington.game.GameState;
 import com.huntingmrxwellington.game.PlayerView;
 import com.huntingmrxwellington.game.Role;
 import com.huntingmrxwellington.game.TestMaps;
+import com.huntingmrxwellington.game.TicketType;
+import com.huntingmrxwellington.game.ValidMove;
 import com.huntingmrxwellington.service.GameService.JoinResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -101,6 +103,16 @@ class GameServiceTest {
     }
 
     @Test
+    void joiningUsesTheCodeToFindTheRightGame() {
+        GameService seeded = new GameService(messaging, TestMaps.small(), ServiceFixtures.SETTINGS, new Random(1), () -> now);
+        List<JoinResponse> hosts = List.of(seeded.createGame("A", 4), seeded.createGame("B", 4), seeded.createGame("C", 4));
+        for (JoinResponse host : hosts) {
+            JoinResponse guest = seeded.joinGame(host.gameState().joinCode(), "Guest");
+            assertThat(guest.gameState().gameId()).isEqualTo(host.gameState().gameId());
+        }
+    }
+
+    @Test
     void joiningBroadcastsTheLobby() {
         JoinResponse host = service.createGame("Host", 4);
         service.joinGame(host.gameState().joinCode(), "Guest");
@@ -150,6 +162,22 @@ class GameServiceTest {
         assertThat(mrXNode((GameState) sent.get(g.topic()))).isNull();
         assertThat(sent).containsKey(g.privateTopic(g.mrX()) + "/valid-moves");
         assertThat(sent).doesNotContainKey(g.privateTopic(g.detective()) + "/valid-moves");
+    }
+
+    @Test
+    void startReturnsTheHostsViewOfTheStartedGame() {
+        JoinResponse host = service.createGame("Host", 2);
+        service.joinGame(host.gameState().joinCode(), "Guest");
+        GameState started = service.startGame(host.gameState().gameId(), host.playerToken());
+        assertThat(started.phase()).isEqualTo(GamePhase.IN_PROGRESS);
+        assertThat(mrXNode(started)).isEqualTo(1);   // the host is Mr X and sees himself
+    }
+
+    @Test
+    void validMovesAreTheCallersOwn() {
+        Started g = startTwoPlayerGame();
+        assertThat(service.validMoves(g.gameId(), g.mrX().playerToken()))
+                .containsExactly(new ValidMove(5, List.of(TicketType.FERRY, TicketType.BLACK)));
     }
 
     @Test

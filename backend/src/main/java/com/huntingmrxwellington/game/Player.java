@@ -42,7 +42,6 @@ public final class Player {
     void assign(Role role, int node, Map<TicketType, Integer> startingTickets) {
         this.role = role;
         this.node = node;
-        tickets.clear();
         tickets.putAll(startingTickets);
     }
 

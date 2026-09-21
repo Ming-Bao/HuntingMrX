@@ -84,7 +84,6 @@ public final class Game {
 
     /** The host starts the game: random Mr X, random detective order, random distinct start nodes. */
     public void start(Player requester, Random rng) {
-        checkCanStart(requester);
         List<Player> order = new ArrayList<>(players);
         Collections.shuffle(order, rng);
         List<Integer> nodes = new ArrayList<>(map.nodeIds());
