@@ -41,7 +41,7 @@
 	\item Problem: hidden-movement board game limited to co-located play; existing digital versions use fictional boards and no real geography.
 	\item Solution: browser-based, real-time multiplayer game on a 216-node, 372-edge graph of Wellington's bus, train, ferry, and e-scooter network.
 	\item Method: Java/Spring Boot authoritative server, Vue 3 + MapLibre GL client, STOMP over WebSocket, role-filtered state so Mr~X's position is never sent to detectives.
-	\item Evaluation: automated tests (121 backend test methods), map-library benchmark, two user-testing rounds, System Usability Scale (SUS) questionnaire (overall 72.5, n = 7, against the 68 average benchmark).
+	\item Evaluation: automated tests (134 backend tests across unit, mock, lifecycle, integration, functional and property-based/fuzz layers, plus an opt-in latency test; 99.2\% line and 97.8\% branch coverage; 100\% mutation score), map-library benchmark, two user-testing rounds, System Usability Scale (SUS) questionnaire (overall 72.5, n = 7, against the 68 average benchmark).
 	\item Outcome: deployed, playable system suitable for Open Day demonstration.
 \end{itemize}
 \end{abstract}
@@ -103,13 +103,13 @@ Multiplayer game, hidden movement, real-time web application, WebSocket, map ove
 \end{itemize}
 \subsection{Game State Machine and Turn Flow}
 \begin{itemize}
-	\item Phases: Lobby, InProgress (MrXTurn, DetectiveTurn, RoundEnd), Paused, ended states (figure from \texttt{plans/states-diagrams.md}).
+	\item Phases: Lobby, InProgress (MrXTurn, DetectiveTurn, RoundEnd), ended states (detectives win, Mr~X wins, aborted); the lobby closes if the host leaves (figure from \texttt{plans/states-diagrams.md}).
 	\item Every operation validated against phase (e.g.\ start only in lobby, kick only in lobby).
-	\item Disconnect handling: pause, grace period (60 s), abort; turn timer (120 s) with auto-skip.
+	\item Leaving and idling: any player leaving a game in progress aborts it, and the server aborts a game after 15 minutes without a move. Pause-on-disconnect with a 60 s grace period was planned but dropped: user-testing networks dropped WebSockets often, so clients reconnect and re-sync over REST instead of the server pausing.
 \end{itemize}
 \subsection{Domain Model}
 \begin{itemize}
-	\item Player hierarchy: lobby player (no role) becomes Mr~X or detective at start; roles are a runtime assignment (design flaw found and fixed during development; later refactored to an abstract player class).
+	\item Player model: one \texttt{Player} class whose role is assigned at start; every rule lives in a plain \texttt{Game} class with no Spring, which made the rules directly unit-testable (the earlier lobby/Mr~X/detective class hierarchy and abstract player were collapsed in the backend rewrite).
 	\item Ticket model: unlimited regular tickets for Mr~X, finite Invisible and Double; fixed budgets for detectives.
 	\item Class diagram (from \texttt{plans/classdiagram.md}).
 \end{itemize}
@@ -168,16 +168,16 @@ Multiplayer game, hidden movement, real-time web application, WebSocket, map ove
 \end{itemize}
 \subsection{Functional Correctness}
 \begin{itemize}
-	\item Test suite: 121 backend test methods across model, service, lifecycle, controller, and one Selenium end-to-end class; classification (unit, mock, lifecycle, integration, functional) mapped to the proposal's plan.
-	\item Table of layers, counts, what each catches (update from \texttt{mvn test} run for the final numbers).
-	\item Targeted tests: invariants such as Mr~X unlimited tickets stay unlimited, invalid moves rejected, hidden position not leaked.
-	\item Full-game end-to-end test through the REST API with a real browser.
-	\item Gap to state honestly: proposal promised coverage, mutation, fuzz, and property-based testing; nothing in the repository yet (no JaCoCo/PIT/jqwik in \texttt{pom.xml}), so either run them before submission or list as limitation. Frontend has no automated tests.
+	\item Test suite: 134 backend tests: unit (82: \texttt{MapGraph}, \texttt{Player}, \texttt{Game} on hand-drawn boards), mock (17: \texttt{GameService} with mocked messaging), lifecycle (8 scripted complete games), integration (19: HTTP via MockMvc, STOMP with real clients), functional (4: full games over HTTP and STOMP), property-based and fuzz (4, JUnit with seeded random), and performance (1, opt-in); mapped to the proposal's plan.
+	\item Table of layers, counts and what each catches (counts and results in \texttt{documentation/backend-fixes.md}).
+	\item Targeted tests: every bug found in the backend review has a regression test (\texttt{documentation/backend-fixes.md}), e.g.\ Mr~X boxed in, chained double moves, hidden position not leaked over REST or STOMP.
+	\item Full-game end-to-end test through the real server with an HTTP and a STOMP client for every player (it replaced a Selenium test that only used the browser as an HTTP client and was flaky).
+	\item Meta-testing: JaCoCo coverage 99.2\% lines and 97.8\% branches overall (game and service: 99.7\% and 97.7\%); PIT mutation score 100\% (201 of 201 mutants killed) on game and service, after the first run's survivors exposed seven missing tests; property-based tests over 300 seeded random games (every rule holds and every game ends) and fuzz tests (garbage moves, names and request bodies never cause a server error). Frontend has no automated tests.
 \end{itemize}
 \subsection{Performance and Multiplayer Synchronisation}
 \begin{itemize}
 	\item Targets: 500 ms push latency, 3 s map render, concurrent games.
-	\item No measurements in the repository yet: to do a small latency harness (N simulated clients over STOMP, timestamp move submission versus receipt), a concurrent games load test, and a render-time measurement with the real 216-node map.
+	\item Latency harness (\texttt{MultiplayerPerfTest}): 10 concurrent games of 6 players on the real map (987 moves); move submitted to every other player updated p50 4.6 ms, p95 8.3 ms, max 36.6 ms, against the 500 ms target. A render-time measurement with the real map is still to do.
 	\item Report percentile latencies as a figure/table; compare against targets.
 \end{itemize}
 \subsection{User Evaluation}
@@ -198,9 +198,10 @@ Multiplayer game, hidden movement, real-time web application, WebSocket, map ove
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Discussion} % ~0.5 page
 \begin{itemize}
-	\item What worked: pre-computed graph, authoritative server with filtered views, simplification refactor (about 287 lines removed with all tests green).
+	\item What worked: pre-computed graph, authoritative server with filtered views, simplification refactor (about 287 lines removed with all tests green); the backend rewrite into a plain rules core plus a thin Spring service (rules directly unit-testable, eight bugs fixed with regression tests).
 	\item What was hard: map creation effort, disconnect and reconnect behaviour, in-memory state means a restart ends all games.
-	\item Trade-offs revisited: no authentication, no database, desktop-first layout.
+	\item Security lesson: role filtering was bypassable, because public player IDs doubled as credentials and the in-memory STOMP broker honoured wildcard subscriptions and client SENDs; fixed with secret tokens, exact-match subscriptions and dropping client SEND frames.
+	\item Trade-offs revisited: no accounts (per-player secret tokens instead), no database, desktop-first layout.
 	\item Threats to validity: small sample, no automated frontend tests, benchmark scope.
 \end{itemize}
 

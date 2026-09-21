@@ -4,20 +4,20 @@ This doc lists every problem found in the backend review on 2026-09-21: what goe
 
 Code references point at commit `88bf636`, the last commit before the rewrite. Paths are relative to `backend/src/main/java/com/huntingmrxwellington/`.
 
-**Status:** every item below is **Planned**. Each one changes to **Fixed**, with its test names, as it lands.
+**Status:** every item below is **Fixed** as of 2026-09-22, each with the tests named under it. The measured results are at the end.
 
 ## Summary
 
 | ID | Problem | Severity | Status |
 |---|---|---|---|
-| B1 | Game freezes when Mr X is boxed in | High | Planned |
-| B2 | Any player can see Mr X's position and act as other players | High | Planned |
-| B3 | A detective leaving mid-game freezes the game or skips a turn | High | Planned |
-| B4 | Mr X can chain DOUBLE tickets into three moves | Medium | Planned |
-| B5 | Plain `DOUBLE` skips the mode check and hides the transport | Medium | Planned |
-| B6 | Host leaving the lobby strands everyone else | Medium | Planned |
-| B7 | Lobby operations race with each other | Low | Planned |
-| B8 | Missing request fields return 500 instead of 400 | Low | Planned |
+| B1 | Game freezes when Mr X is boxed in | High | Fixed |
+| B2 | Any player can see Mr X's position and act as other players | High | Fixed |
+| B3 | A detective leaving mid-game freezes the game or skips a turn | High | Fixed |
+| B4 | Mr X can chain DOUBLE tickets into three moves | Medium | Fixed |
+| B5 | Plain `DOUBLE` skips the mode check and hides the transport | Medium | Fixed |
+| B6 | Host leaving the lobby strands everyone else | Medium | Fixed |
+| B7 | Lobby operations race with each other | Low | Fixed |
+| B8 | Missing request fields return 500 instead of 400 | Low | Fixed |
 
 ## Game engine bugs
 
@@ -31,7 +31,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 
 **Fix:** whenever the turn passes to Mr X (including at game start), check his legal moves. If he has none, the detectives win, as in the board game. The second leg of a double always has a legal move, because he can go back the way he came.
 
-**Tests:** `GameTest` covers boxed-in at the start of a round and at game start; `GameLifecycleTest` plays a full game to this ending.
+**Tests:** `GameTest.Start.mrXBoxedInAtTheStartLosesStraightAway`, `GameTest.Endings.mrXWithNoLegalMoveAtTheStartOfHisTurnLoses`, `GameLifecycleTest.mrXBoxedInLoses`.
 
 ### B2. Any player can see Mr X's position and act as other players
 
@@ -43,8 +43,8 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
    - Moves, starts and kicks trust whatever ID is in the request body (`:110`, `:208`, `controller/GameController.java:52`).
 2. `DELETE /api/games/{id}/players/{anyId}` with no body is treated as that player leaving (`controller/GameController.java:52`). Anyone can remove anyone, including making Mr X "leave", which aborts the game.
 3. Private STOMP topics are named with the public player ID (`service/GameService.java:480`), so anyone can subscribe to Mr X's.
-4. The in-memory STOMP broker accepts wildcard subscriptions (`config/WebSocketConfig.java:15`). Subscribing to `/topic/games/{id}/players/**` receives every player's private state without knowing any ID. This was confirmed on 2026-09-21 against Spring's `DefaultSubscriptionRegistry`.
-5. Clients can probably also send messages straight to `/topic/...`, which would let them fake server broadcasts to the lobby. A test will confirm this before it's blocked.
+4. The in-memory STOMP broker accepts wildcard subscriptions (`config/WebSocketConfig.java:15`). Subscribing to `/topic/games/{id}/players/**` receives every player's private state without knowing any ID. This was confirmed on 2026-09-21 against Spring's `DefaultSubscriptionRegistry`, and `WebSocketIntegrationTest.aWildcardSubscriptionReceivesNothing` failed against the old config: the eavesdropper received Mr X's private state.
+5. Clients could also send messages straight to `/topic/...`, and the broker delivered them to subscribers as if the server had sent them. Confirmed by `WebSocketIntegrationTest.clientsCannotPublishToTopics` failing before the fix: a fake `"phase":"ENDED"` sent by one client reached the lobby.
 
 **Fix:**
 - Each player gets a secret `playerToken` when they create or join a game. It's returned only in that response and is never included in any broadcast.
@@ -55,9 +55,10 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 - The frontend stores the token next to the player ID and sends it on those calls.
 
 **Tests:**
-- `ApiIntegrationTest`: token rules on every endpoint.
-- `WebSocketIntegrationTest`: a wildcard subscriber receives nothing, a client SEND is rejected, and a detective's topic never carries Mr X's position.
-- `GameServiceTest`: tokens appear in topic names but never in message payloads.
+- `ApiIntegrationTest`: `mrXsPublicIdGivesNoAccess`, `actingWithoutATokenIsForbidden`, `aDetectiveCannotRemoveMrX`, `theStateNeverContainsATokenAndHidesMrXFromThePublic`.
+- `WebSocketIntegrationTest`: `aWildcardSubscriptionReceivesNothing` and `clientsCannotPublishToTopics` (both failed against the old config before the fix), and `eachPlayerHearsTheirOwnViewAndOnlyTheCurrentPlayerGetsMoves`.
+- `GameServiceTest`: `actingNeedsAValidTokenAndAPublicIdIsNotOne`, `tokensAppearInTopicNamesButNeverInPayloads`.
+- `GameTest.Kicking.nobodyCanBeKickedOnceTheGameStarts`.
 
 ### B3. A detective leaving mid-game freezes the game or skips a turn
 
@@ -67,7 +68,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 
 **Fix:** new rule: **any player leaving an in-progress game ends it**, with an abort reason naming who left. The frontend already sends everyone to the end screen when a game ends. The stored turn index goes away too: turn order is worked out from the current player each time.
 
-**Tests:** `GameTest` covers a detective leaving on their turn, a detective leaving off their turn, and Mr X leaving; `GameLifecycleTest` plays a game to this ending.
+**Tests:** `GameTest.Leaving.aDetectiveLeavingOnTheirTurnEndsTheGame`, `GameTest.Leaving.aDetectiveLeavingOffTheirTurnAlsoEndsTheGame`, `GameTest.Leaving.mrXLeavingMidDoubleEndsTheGameWithNoWinner`, `GameLifecycleTest.aPlayerLeavingEndsTheGameForEveryone`, `FullGameE2ETest.aPlayerLeavingMidGameSendsEveryoneTheEndedState`.
 
 ### B4. Mr X can chain DOUBLE tickets into three moves
 
@@ -77,7 +78,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 
 **Fix:** a DOUBLE while a double is pending is rejected with 400 "A double move is already in progress".
 
-**Tests:** `GameTest`.
+**Tests:** `GameTest.DoubleMoves.aSecondDoubleDuringADoubleIsRejected`.
 
 ### B5. Plain `DOUBLE` skips the mode check and hides the transport
 
@@ -87,7 +88,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 
 **Fix:** the first leg of a double must be `DOUBLE_<ESCOOTER|BUS|TRAIN|FERRY|BLACK>`. A plain `DOUBLE` gets a 400. The docs are updated to match what the frontend already sends.
 
-**Tests:** `GameTest`, plus a request-level check in `ApiIntegrationTest`.
+**Tests:** `GameTest.DoubleMoves.aPlainDoubleTicketIsRejected`, `ApiIntegrationTest.badMoveRequestsAre400NotServerErrors`.
 
 ### B6. Host leaving the lobby strands everyone else
 
@@ -97,7 +98,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 
 **Fix:** the host leaving ends the lobby for everyone. The game is marked ended with the reason "The host left the game" and stays in memory, so both the live broadcast and the polls show it. The lobby screen already displays this message for ended games.
 
-**Tests:** `GameTest`, `GameLifecycleTest`.
+**Tests:** `GameTest.Leaving.theHostLeavingTheLobbyEndsItForEveryone`, `GameLifecycleTest.theHostLeavingTheLobbyClosesItForEveryone`.
 
 ### B7. Lobby operations race with each other
 
@@ -107,7 +108,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 
 **Fix:** every operation on a game, reads included, runs inside `synchronized (game)` in `GameService`.
 
-**Tests:** `GameServiceTest` starts many threads joining one game at once and checks it never goes over `maxPlayers`.
+**Tests:** `GameServiceTest.concurrentJoinsNeverOverfillAGame` starts 40 threads joining one 6-player game at once and checks that exactly 5 get in.
 
 ### B8. Missing request fields return 500 instead of 400
 
@@ -117,7 +118,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 
 **Fix:** requests are validated at the controller and service boundary. Missing, blank or malformed fields get a 400 with an `{error}` message, and malformed JSON gets the same treatment.
 
-**Tests:** `ApiIntegrationTest`; the fuzz test (`ApiFuzzTest`) sends random JSON to every endpoint and checks that none of them returns a 500.
+**Tests:** `ApiIntegrationTest.badCreateRequestsAre400WithAnErrorMessage` and `ApiIntegrationTest.badMoveRequestsAre400NotServerErrors` (a move without `toNodeId` returned a 500 before the fix), and `ApiFuzzTest.noRequestCausesAServerError`, which sends random JSON to every endpoint.
 
 ## Other fixes
 
@@ -138,6 +139,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 | The Selenium test only used Firefox to send HTTP requests, didn't test the UI, and was flaky because of B1. | Replaced by a browserless full-game test that uses real HTTP and STOMP clients and checks the game's invariants after every move. |
 | Nothing tested the WebSocket side, including the role filtering that hides Mr X. | `WebSocketIntegrationTest` with real STOMP clients. |
 | About 15 tests duplicated others and about 10 only checked getters. Tests reached into private fields with reflection. | Removed or rewritten. No reflection in the new suite. |
+| The root `.gitignore` had a `test/` line from a Vue template, which ignored `backend/src/test`, so new test files could never be committed. | The line is removed. |
 | None of the coverage, mutation, fuzz, property-based or performance testing promised in the proposal existed. | JaCoCo coverage on every run, PIT mutation testing on demand, property-based and fuzz tests (plain JUnit, seeded random), and an opt-in multiplayer latency test. |
 
 ## Behaviour changes players will notice
@@ -146,3 +148,16 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 - If anyone leaves a game in progress, the game ends for everyone.
 - If the host leaves the lobby, the lobby closes for everyone with a message.
 - Mr X can't play a second DOUBLE during a double move.
+
+## Results
+
+Measured on 2026-09-22 on the finished rewrite.
+
+| Measure | Before | After |
+|---|---|---|
+| Backend tests | 120 (one flaky) | 134, all passing, plus 1 opt-in latency test |
+| Tests by category | | unit 82, mock 17, lifecycle 8, integration 19, functional 4, property-based and fuzz 4 |
+| Coverage, whole backend (without the browser test) | 65% of lines, 45% of branches | 99.2% of lines, 97.8% of branches |
+| Coverage, `game` + `service` | | 99.7% of lines, 97.7% of branches |
+| Mutation score (PIT, `game` + `service`) | not measured | 100%: 201 of 201 mutants killed. The first run killed 95%; its survivors pointed at seven missing tests and two redundant lines, all fixed. |
+| Move submitted to every other player updated (10 concurrent games × 6 players, real map, 987 moves) | not measured | p50 4.6 ms, p95 8.3 ms, max 36.6 ms (target 500 ms) |
