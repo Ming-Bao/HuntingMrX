@@ -6,7 +6,7 @@
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
 		<version>4.0.6</version>
-		<relativePath/> 
+		<relativePath/>
 	</parent>
 	<groupId>com.huntingmrxwellington</groupId>
 	<artifactId>hunting-mrx-wellington-backend</artifactId>
@@ -28,7 +28,8 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
-		<e2e.headless>true</e2e.headless>
+		<!-- The latency test is opt-in: mvn test -Dgroups=perf -DexcludedGroups= -->
+		<excludedGroups>perf</excludedGroups>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -46,9 +47,9 @@
 			<scope>test</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.seleniumhq.selenium</groupId>
-			<artifactId>selenium-java</artifactId>
-			<version>4.27.0</version>
+			<groupId>net.jqwik</groupId>
+			<artifactId>jqwik</artifactId>
+			<version>1.10.1</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
@@ -59,13 +60,51 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+			<!-- Coverage report on every `mvn test`: target/site/jacoco/index.html -->
 			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-surefire-plugin</artifactId>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>0.8.13</version>
+				<executions>
+					<execution>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>test</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<!-- Mutation testing, on demand:
+			     mvn test-compile org.pitest:pitest-maven:mutationCoverage
+			     Report: target/pit-reports/index.html. Runs only the fast rules and service tests. -->
+			<plugin>
+				<groupId>org.pitest</groupId>
+				<artifactId>pitest-maven</artifactId>
+				<version>1.30.0</version>
+				<dependencies>
+					<dependency>
+						<groupId>org.pitest</groupId>
+						<artifactId>pitest-junit5-plugin</artifactId>
+						<version>1.2.3</version>
+					</dependency>
+				</dependencies>
 				<configuration>
-					<systemPropertyVariables>
-						<e2e.headless>${e2e.headless}</e2e.headless>
-					</systemPropertyVariables>
+					<targetClasses>
+						<param>com.huntingmrxwellington.game.*</param>
+						<param>com.huntingmrxwellington.service.*</param>
+					</targetClasses>
+					<targetTests>
+						<param>com.huntingmrxwellington.game.*</param>
+						<param>com.huntingmrxwellington.service.*</param>
+					</targetTests>
+					<threads>4</threads>
+					<timestampedReports>false</timestampedReports>
 				</configuration>
 			</plugin>
 		</plugins>
