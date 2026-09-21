@@ -74,6 +74,7 @@ public class GameController {
     public GameState submitMove(@PathVariable String id,
                                 @RequestHeader(value = TOKEN_HEADER, required = false) String token,
                                 @RequestBody MoveRequest req) {
+        if (req.toNodeId() == null) throw new IllegalArgumentException("toNodeId is required");
         return games.submitMove(id, token, req.toNodeId(), req.ticket());
     }
 }
