@@ -10,9 +10,11 @@
 - After every change, `GameService` publishes the public view, each player's private view (on a topic named by their token), and the current player's valid moves.
 - The STOMP broker matches exact destinations only and drops client SEND frames.
 
-**Tech Stack:** Java 21, Spring Boot 4.0.6 (Spring 7.0.7, Jackson 3.1 in `tools.jackson`), JUnit 6 + AssertJ + Mockito (from spring-boot-starter-test), jqwik 1.10.1, JaCoCo 0.8.13, PIT 1.30.0 + pitest-junit5-plugin 1.2.3, Vue 3 + TypeScript frontend.
+**Tech Stack:** Java 21, Spring Boot 4.0.6 (Spring 7.0.7, Jackson 3.1 in `tools.jackson`), JUnit 6 + AssertJ + Mockito (from spring-boot-starter-test), JaCoCo 0.8.13, PIT 1.30.0 + pitest-junit5-plugin 1.2.3, Vue 3 + TypeScript frontend.
 
 **Spec:** `docs/superpowers/specs/2026-09-21-backend-rewrite-design.md`. Per-bug detail is in `documentation/backend-fixes.md`.
+
+**Revision (2026-09-21, after Task 5):** jqwik is dropped. Its engine prints a notice asking AI agents not to use the library, so at the user's request the property-based and fuzz tests (Task 11) use plain JUnit with seeded `java.util.Random`. The executed Task 1 commit (`3db7d6d`) still added jqwik; a later commit removes it. The property test classes are now named `GamePropertyTest` and `ApiFuzzTest`, because Maven's default test includes only pick up class names ending in `Test`.
 
 ## Global Constraints
 
@@ -57,7 +59,7 @@
 - Test clients: `T/support/HttpTestClient.java`, `StompTestClient.java`
 - Controller: `T/controller/ApiIntegrationTest.java`, `WebSocketIntegrationTest.java`
 - End to end: `T/e2e/FullGameE2ETest.java` (new content)
-- Property and fuzz: `T/property/GameInvariantProperties.java`, `ApiFuzzProperties.java`
+- Property and fuzz: `T/property/GamePropertyTest.java`, `ApiFuzzTest.java`
 - Performance: `T/perf/MultiplayerPerfTest.java`
 
 **Tests deleted:**
@@ -78,14 +80,14 @@
 
 ---
 
-### Task 1: Build tooling (JaCoCo, PIT, jqwik) and remove Selenium
+### Task 1: Build tooling (JaCoCo, PIT) and remove Selenium
 
 **Files:**
 - Modify: `backend/pom.xml` (whole file)
 - Delete: `T/e2e/FullGameE2ETest.java`, `backend/src/main/resources/static/e2e.html`
 
 **Interfaces:**
-- Produces: `mvn test` writes `backend/target/site/jacoco/index.html`. `mvn test-compile org.pitest:pitest-maven:mutationCoverage` runs PIT. jqwik is on the test classpath. Tests tagged `perf` are skipped unless you pass `-Dgroups=perf -DexcludedGroups=`.
+- Produces: `mvn test` writes `backend/target/site/jacoco/index.html`. `mvn test-compile org.pitest:pitest-maven:mutationCoverage` runs PIT. Tests tagged `perf` are skipped unless you pass `-Dgroups=perf -DexcludedGroups=`.
 
 - [ ] **Step 1: Replace `backend/pom.xml` with:**
 
@@ -136,12 +138,6 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>net.jqwik</groupId>
-			<artifactId>jqwik</artifactId>
-			<version>1.10.1</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
@@ -4185,20 +4181,23 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 11: Property-based and fuzz tests (jqwik)
+### Task 11: Property-based and fuzz tests (JUnit, seeded random)
 
 **Files:**
-- Test: `T/property/GameInvariantProperties.java`, `T/property/ApiFuzzProperties.java`
+- Test: `T/property/GamePropertyTest.java`, `T/property/ApiFuzzTest.java`
 
 **Interfaces:**
 - Consumes:
   - the public `Game` API: `start(Player, Random)`, `move`, `validMoves`, `players`, `viewFor`, `mrXLog`, getters
   - `GameService`'s public constructor, `GameController`, `MapController`, `ApiExceptionHandler`
   - `TestMaps.small()`
+- Produces: `GamePropertyTest.forEachSeed(int seeds, SeedCheck check)` and `GamePropertyTest.randomString(Random, int)`, which `ApiFuzzTest` reuses.
+
+These use plain JUnit 5 and `java.util.Random` (see the revision note at the top). Each property is one `@Test` that runs over fixed seeds 1 to N. That keeps runs repeatable, a failure names the seed that reproduces it, and the test count stays honest: one test per property, not one per seed. There's no automatic shrinking. To replay a failure, run that single seed.
 
 - [ ] **Step 1: Write the rules-engine properties**
 
-`T/property/GameInvariantProperties.java`:
+`T/property/GamePropertyTest.java`:
 
 ```java
 package com.huntingmrxwellington.property;
@@ -4212,15 +4211,7 @@ import com.huntingmrxwellington.game.MrXMove;
 import com.huntingmrxwellington.game.Player;
 import com.huntingmrxwellington.game.TicketType;
 import com.huntingmrxwellington.game.ValidMove;
-import net.jqwik.api.Arbitraries;
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.Combinators;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.From;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
-import net.jqwik.api.constraints.IntRange;
-import net.jqwik.api.constraints.Size;
+import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
 import java.io.IOException;
@@ -4232,78 +4223,112 @@ import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.huntingmrxwellington.game.TicketType.*;
+import static com.huntingmrxwellington.game.TicketType.BUS;
+import static com.huntingmrxwellington.game.TicketType.DOUBLE;
+import static com.huntingmrxwellington.game.TicketType.ESCOOTER;
+import static com.huntingmrxwellington.game.TicketType.FERRY;
+import static com.huntingmrxwellington.game.TicketType.TRAIN;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
-/** Property-based and fuzz tests of the rules engine, on the real Wellington map. */
-class GameInvariantProperties {
+/** Property-based and fuzz tests of the rules engine on the real Wellington map. Each property
+ *  runs once per seed, so runs are repeatable and a failure names the seed that reproduces it. */
+class GamePropertyTest {
 
+    static final int SEEDS = 300;
     static final MapGraph WELLINGTON = load("map.json");
     static final Map<TicketType, Integer> TICKETS = Map.of(ESCOOTER, 12, BUS, 8, TRAIN, 6, FERRY, 2);
+    static final String[] TICKET_SAMPLES = {"ESCOOTER", "BUS", "TRAIN", "FERRY", "BLACK", "DOUBLE",
+            "DOUBLE_BUS", "DOUBLE_BLACK", "DOUBLE_DOUBLE", "bus", "", null};
 
-    /** Random legal games with 2 to 6 players, sometimes using double moves. Every rule holds after
+    /** One run of a property for one seed. */
+    interface SeedCheck {
+        void run(long seed) throws Exception;
+    }
+
+    /** Random legal games with 2 to 6 players, sometimes using double moves: every rule holds after
      *  every move, whoever's turn it is can always move, and every game ends within 24 rounds. */
-    @Property(tries = 300)
-    void randomLegalGamesKeepEveryRuleAndAlwaysEnd(@ForAll @IntRange(min = 2, max = 6) int playerCount,
-                                                   @ForAll long seed) {
-        Random rng = new Random(seed);
-        Game game = startedGame(playerCount, rng);
-        int moves = 0;
-        while (game.phase() == GamePhase.IN_PROGRESS) {
-            assertThat(++moves).isLessThanOrEqualTo(Game.LAST_ROUND * (playerCount + 1));
-            Player player = game.currentPlayer().orElseThrow();
-            List<ValidMove> options = game.validMoves(player);
-            assertThat(options).isNotEmpty();
-            ValidMove move = options.get(rng.nextInt(options.size()));
-            TicketType ticket = move.ticketOptions().get(rng.nextInt(move.ticketOptions().size()));
-            boolean asDouble = player.isMrX() && !game.doubleMovePending() && player.has(DOUBLE) && rng.nextInt(8) == 0;
-            game.move(player, move.nodeId(), (asDouble ? "DOUBLE_" : "") + ticket);
-            checkRules(game);
-        }
-        assertThat(game.winner()).isNotNull();
-        assertThat(game.abortReason()).isNull();
+    @Test
+    void randomLegalGamesKeepEveryRuleAndAlwaysEnd() {
+        forEachSeed(SEEDS, seed -> {
+            Random rng = new Random(seed);
+            int playerCount = 2 + rng.nextInt(5);
+            Game game = startedGame(playerCount, rng);
+            int moves = 0;
+            while (game.phase() == GamePhase.IN_PROGRESS) {
+                assertThat(++moves).isLessThanOrEqualTo(Game.LAST_ROUND * (playerCount + 1));
+                Player player = game.currentPlayer().orElseThrow();
+                List<ValidMove> options = game.validMoves(player);
+                assertThat(options).isNotEmpty();
+                ValidMove move = options.get(rng.nextInt(options.size()));
+                TicketType ticket = move.ticketOptions().get(rng.nextInt(move.ticketOptions().size()));
+                boolean asDouble = player.isMrX() && !game.doubleMovePending() && player.has(DOUBLE) && rng.nextInt(8) == 0;
+                game.move(player, move.nodeId(), (asDouble ? "DOUBLE_" : "") + ticket);
+                checkRules(game);
+            }
+            assertThat(game.winner()).isNotNull();
+            assertThat(game.abortReason()).isNull();
+        });
     }
 
     /** Fuzz: random, mostly invalid moves by random players. The engine only ever answers with the
      *  three expected errors, and a rejected move never breaks a rule. */
-    @Property(tries = 300)
-    void garbageMovesOnlyRaiseTheExpectedErrors(@ForAll long seed,
-                                                @ForAll @Size(max = 40) List<@From("actions") Action> actions) {
-        Game game = startedGame(3, new Random(seed));
-        for (Action a : actions) {
-            if (game.phase() != GamePhase.IN_PROGRESS) break;
-            Player player = game.players().get(a.who() % game.players().size());
-            try {
-                game.move(player, a.node(), a.ticket());
-            } catch (IllegalArgumentException | ForbiddenException | ConflictException expected) {
-                // rejected cleanly
+    @Test
+    void garbageMovesOnlyRaiseTheExpectedErrors() {
+        forEachSeed(SEEDS, seed -> {
+            Random rng = new Random(seed);
+            Game game = startedGame(3, rng);
+            for (int i = 0; i < 40 && game.phase() == GamePhase.IN_PROGRESS; i++) {
+                Player player = game.players().get(rng.nextInt(game.players().size()));
+                String ticket = rng.nextInt(3) == 0 ? randomString(rng, 12)
+                        : TICKET_SAMPLES[rng.nextInt(TICKET_SAMPLES.length)];
+                try {
+                    game.move(player, rng.nextInt(332) - 1, ticket);   // node -1 to 330
+                } catch (IllegalArgumentException | ForbiddenException | ConflictException expected) {
+                    // rejected cleanly
+                }
+                checkRules(game);
             }
-            checkRules(game);
+        });
+    }
+
+    /** Fuzz: any name, control and non-ASCII characters included, either joins (stripped,
+     *  1 to 20 characters) or is rejected cleanly. */
+    @Test
+    void anyNameJoinsCleanlyOrIsRejected() {
+        forEachSeed(SEEDS, seed -> {
+            String name = randomString(new Random(seed), 30);
+            Game game = new Game("g", "CODE00", 6, WELLINGTON, TICKETS, InstantSource.system());
+            try {
+                Player p = game.join(name);
+                assertThat(p.name()).isEqualTo(name.strip()).isNotBlank().hasSizeLessThanOrEqualTo(Game.MAX_NAME_LENGTH);
+            } catch (IllegalArgumentException expected) {
+                // blank or too long
+            }
+        });
+    }
+
+    /** Runs the check once for each seed from 1 to seeds; a failure names the seed so it can be replayed. */
+    static void forEachSeed(int seeds, SeedCheck check) {
+        for (long seed = 1; seed <= seeds; seed++) {
+            long s = seed;
+            assertThatCode(() -> check.run(s)).as("seed %d", s).doesNotThrowAnyException();
         }
     }
 
-    /** Fuzz: any name either joins (stripped, 1 to 20 characters) or is rejected cleanly. */
-    @Property(tries = 500)
-    void anyNameJoinsCleanlyOrIsRejected(@ForAll String name) {
-        Game game = new Game("g", "CODE00", 6, WELLINGTON, TICKETS, InstantSource.system());
-        try {
-            Player p = game.join(name);
-            assertThat(p.name()).isEqualTo(name.strip()).isNotBlank().hasSizeLessThanOrEqualTo(Game.MAX_NAME_LENGTH);
-        } catch (IllegalArgumentException expected) {
-            // blank or too long
+    /** Up to maxLength characters: control characters, several kinds of whitespace, letters, and
+     *  anything else below the surrogate range. */
+    static String randomString(Random rng, int maxLength) {
+        StringBuilder s = new StringBuilder();
+        for (int i = rng.nextInt(maxLength + 1); i > 0; i--) {
+            s.append(switch (rng.nextInt(4)) {
+                case 0 -> (char) rng.nextInt(0x20);
+                case 1 -> " \t\n  ".charAt(rng.nextInt(5));
+                case 2 -> (char) ('a' + rng.nextInt(26));
+                default -> (char) rng.nextInt(0xD800);
+            });
         }
-    }
-
-    record Action(int who, int node, String ticket) {}
-
-    @Provide
-    Arbitrary<Action> actions() {
-        Arbitrary<String> tickets = Arbitraries.oneOf(
-                Arbitraries.of("ESCOOTER", "BUS", "TRAIN", "FERRY", "BLACK", "DOUBLE", "DOUBLE_BUS",
-                        "DOUBLE_BLACK", "DOUBLE_DOUBLE", "bus", ""),
-                Arbitraries.strings().ofMaxLength(12));
-        return Combinators.combine(Arbitraries.integers().between(0, 2), Arbitraries.integers().between(-1, 330), tickets)
-                .as(Action::new);
+        return s.toString();
     }
 
     /** The rules every game state must satisfy. */
@@ -4354,9 +4379,9 @@ class GameInvariantProperties {
 }
 ```
 
-- [ ] **Step 2: Write the HTTP fuzz property**
+- [ ] **Step 2: Write the HTTP fuzz test**
 
-`T/property/ApiFuzzProperties.java`:
+`T/property/ApiFuzzTest.java`:
 
 ```java
 package com.huntingmrxwellington.property;
@@ -4368,13 +4393,7 @@ import com.huntingmrxwellington.controller.MapController;
 import com.huntingmrxwellington.game.MapGraph;
 import com.huntingmrxwellington.game.TestMaps;
 import com.huntingmrxwellington.service.GameService;
-import net.jqwik.api.Arbitraries;
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.Combinators;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
-import net.jqwik.api.lifecycle.BeforeTry;
+import org.junit.jupiter.api.Test;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -4382,6 +4401,11 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.Random;
+import java.util.StringJoiner;
+
+import static com.huntingmrxwellington.property.GamePropertyTest.forEachSeed;
+import static com.huntingmrxwellington.property.GamePropertyTest.randomString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -4389,82 +4413,104 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /** Fuzz: random request bodies, with and without a token, against every endpoint of the real
- *  controller and service (in a started game). Nothing may cause a server error. */
-class ApiFuzzProperties {
+ *  controller and service in a started game. Nothing may cause a server error. */
+class ApiFuzzTest {
 
     static final ObjectMapper JSON = new ObjectMapper();
     static final GameSettings SETTINGS = new GameSettings("test-map.json", 900, 12, 8, 6, 2);
+    static final String[] ENDPOINTS = {"create", "join", "get", "start", "validMoves", "move", "leave", "kick", "unknownGame"};
+    static final String[] KEYS = {"hostName", "maxPlayers", "joinCode", "playerName", "toNodeId", "ticket", "x"};
+    static final String[] VALUES = {"null", "true", "[]", "{}", "1.5", "-1", "0", "7", "99999999999",
+            "\"DOUBLE_BUS\"", "\"BLACK\"", "\"\""};
 
-    MockMvc mvc;
-    String gameId;
-    String playerId;
-    String token;
-
-    @BeforeTry
-    void newStartedGame() throws Exception {
-        MapGraph map = TestMaps.small();
-        GameService service = new GameService(new SimpMessagingTemplate((message, timeout) -> true), map, SETTINGS);
-        mvc = MockMvcBuilders.standaloneSetup(new GameController(service), new MapController(map))
-                .setControllerAdvice(new ApiExceptionHandler()).build();
-        JsonNode host = send(post("/api/games/create").content("{\"hostName\":\"Host\",\"maxPlayers\":3}"));
-        gameId = host.get("gameState").get("gameId").asString();
-        playerId = host.get("playerId").asString();
-        token = host.get("playerToken").asString();
-        send(post("/api/games/join").content("{\"joinCode\":\"" + host.get("gameState").get("joinCode").asString()
-                + "\",\"playerName\":\"Guest\"}"));
-        send(post("/api/games/" + gameId + "/start").header(GameController.TOKEN_HEADER, token));
+    /** For each seed: a fresh started game, then five random requests against it. */
+    @Test
+    void noRequestCausesAServerError() {
+        forEachSeed(100, seed -> {
+            Random rng = new Random(seed);
+            App app = new App();
+            for (int i = 0; i < 5; i++) {
+                String endpoint = ENDPOINTS[rng.nextInt(ENDPOINTS.length)];
+                String body = randomBody(rng);
+                int status = app.send(endpoint, body, rng.nextBoolean());
+                assertThat(status).as("%s with body %s", endpoint, body).isLessThan(500);
+            }
+        });
     }
 
-    @Property(tries = 400)
-    void noRequestCausesAServerError(@ForAll("endpoints") String endpoint, @ForAll("bodies") String body,
-                                     @ForAll boolean withToken) throws Exception {
-        String game = "/api/games/" + gameId;
-        MockHttpServletRequestBuilder request = switch (endpoint) {
-            case "create" -> post("/api/games/create");
-            case "join" -> post("/api/games/join");
-            case "get" -> get(game);
-            case "start" -> post(game + "/start");
-            case "validMoves" -> get(game + "/valid-moves");
-            case "move" -> post(game + "/moves");
-            case "leave" -> delete(game + "/players/" + playerId);
-            case "kick" -> delete(game + "/players/someone");
-            default -> get("/api/games/" + endpoint);   // an unknown game id
+    /** A JSON object with random fields, random junk, or one of a few awkward bodies. */
+    static String randomBody(Random rng) {
+        return switch (rng.nextInt(3)) {
+            case 0 -> {
+                StringJoiner fields = new StringJoiner(",", "{", "}");
+                for (int i = rng.nextInt(5); i > 0; i--) {
+                    String value = rng.nextBoolean() ? VALUES[rng.nextInt(VALUES.length)] : "\"" + letters(rng, 25) + "\"";
+                    fields.add("\"" + KEYS[rng.nextInt(KEYS.length)] + "\":" + value);
+                }
+                yield fields.toString();
+            }
+            case 1 -> randomString(rng, 40);
+            default -> new String[] {"", "[]", "null", "{"}[rng.nextInt(4)];
         };
-        request.contentType(APPLICATION_JSON).content(body);
-        if (withToken) request.header(GameController.TOKEN_HEADER, token);
-        int status = mvc.perform(request).andReturn().getResponse().getStatus();
-        assertThat(status).as("%s with body %s", endpoint, body).isLessThan(500);
     }
 
-    @Provide
-    Arbitrary<String> endpoints() {
-        return Arbitraries.oneOf(
-                Arbitraries.of("create", "join", "get", "start", "validMoves", "move", "leave", "kick"),
-                Arbitraries.strings().alpha().ofMinLength(1).ofMaxLength(10));
+    static String letters(Random rng, int maxLength) {
+        StringBuilder s = new StringBuilder();
+        for (int i = rng.nextInt(maxLength + 1); i > 0; i--) s.append((char) ('a' + rng.nextInt(26)));
+        return s.toString();
     }
 
-    @Provide
-    Arbitrary<String> bodies() {
-        Arbitrary<String> value = Arbitraries.oneOf(
-                Arbitraries.strings().alpha().ofMaxLength(25).map(s -> "\"" + s + "\""),
-                Arbitraries.integers().map(String::valueOf),
-                Arbitraries.of("null", "true", "[]", "{}", "1.5", "-1", "\"DOUBLE_BUS\"", "\"BLACK\""));
-        Arbitrary<String> key = Arbitraries.of("hostName", "maxPlayers", "joinCode", "playerName", "toNodeId", "ticket", "x");
-        Arbitrary<String> object = Combinators.combine(key, value).as((k, v) -> "\"" + k + "\":" + v)
-                .list().ofMaxSize(4).map(fields -> "{" + String.join(",", fields) + "}");
-        return Arbitraries.oneOf(object, Arbitraries.strings().ofMaxLength(40), Arbitraries.of("", "[]", "null", "{"));
-    }
+    /** The real controller and service on the small test board, with one started three-player game. */
+    static final class App {
 
-    JsonNode send(MockHttpServletRequestBuilder request) throws Exception {
-        return JSON.readTree(mvc.perform(request.contentType(APPLICATION_JSON)).andReturn().getResponse().getContentAsString());
+        final MockMvc mvc;
+        final String gameId;
+        final String playerId;
+        final String token;
+
+        App() throws Exception {
+            MapGraph map = TestMaps.small();
+            GameService service = new GameService(new SimpMessagingTemplate((message, timeout) -> true), map, SETTINGS);
+            mvc = MockMvcBuilders.standaloneSetup(new GameController(service), new MapController(map))
+                    .setControllerAdvice(new ApiExceptionHandler()).build();
+            JsonNode host = read(post("/api/games/create").content("{\"hostName\":\"Host\",\"maxPlayers\":3}"));
+            gameId = host.get("gameState").get("gameId").asString();
+            playerId = host.get("playerId").asString();
+            token = host.get("playerToken").asString();
+            read(post("/api/games/join").content("{\"joinCode\":\"" + host.get("gameState").get("joinCode").asString()
+                    + "\",\"playerName\":\"Guest\"}"));
+            read(post("/api/games/" + gameId + "/start").header(GameController.TOKEN_HEADER, token));
+        }
+
+        int send(String endpoint, String body, boolean withToken) throws Exception {
+            String game = "/api/games/" + gameId;
+            MockHttpServletRequestBuilder request = switch (endpoint) {
+                case "create" -> post("/api/games/create");
+                case "join" -> post("/api/games/join");
+                case "get" -> get(game);
+                case "start" -> post(game + "/start");
+                case "validMoves" -> get(game + "/valid-moves");
+                case "move" -> post(game + "/moves");
+                case "leave" -> delete(game + "/players/" + playerId);
+                case "kick" -> delete(game + "/players/someone");
+                default -> get("/api/games/no-such-game");
+            };
+            request.contentType(APPLICATION_JSON).content(body);
+            if (withToken) request.header(GameController.TOKEN_HEADER, token);
+            return mvc.perform(request).andReturn().getResponse().getStatus();
+        }
+
+        JsonNode read(MockHttpServletRequestBuilder request) throws Exception {
+            return JSON.readTree(mvc.perform(request.contentType(APPLICATION_JSON)).andReturn().getResponse().getContentAsString());
+        }
     }
 }
 ```
 
-- [ ] **Step 3: Run the properties**
+- [ ] **Step 3: Run them**
 
-Run: `cd backend && mvn -B test -Dtest='GameInvariantProperties,ApiFuzzProperties' 2>&1 | grep -E "Tests run:|FAIL|Shrunk|Original Sample|BUILD" | tail -6`
-Expected: `BUILD SUCCESS`. If a property fails, jqwik prints the shrunk sample. That's a real bug: add a `GameTest` case that reproduces it, fix `Game`, and re-run. Don't loosen the property.
+Run: `cd backend && mvn -B test -Dtest='GamePropertyTest,ApiFuzzTest' 2>&1 | grep -E "Tests run:|FAIL|seed|BUILD" | tail -6`
+Expected: `Tests run: 4, Failures: 0` and `BUILD SUCCESS`. If one fails, the message starts with `[seed N]`. That's a real bug: add a `GameTest` case that reproduces it, fix `Game`, and re-run. Don't loosen the property.
 
 - [ ] **Step 4: Check the properties can fail**
 
@@ -4473,7 +4519,7 @@ Break one rule on purpose (let Mr X's valid moves include detective nodes), see 
 ```bash
 cd backend
 sed -i 's/if (blocked.contains(to)) return;/\/\/ sabotaged/' src/main/java/com/huntingmrxwellington/game/MapGraph.java
-mvn -B -q test -Dtest=GameInvariantProperties > /dev/null 2>&1; echo "exit $?"
+mvn -B -q test -Dtest=GamePropertyTest > /dev/null 2>&1; echo "exit $?"
 git checkout src/main/java/com/huntingmrxwellington/game/MapGraph.java && git diff --stat
 ```
 
@@ -4481,12 +4527,12 @@ Expected: a non-zero `exit` (the property failed), then no `git diff` output (`M
 
 - [ ] **Step 5: Run the whole suite, then commit**
 
-Run: `cd backend && mvn -B -q test`
-Expected: exits 0.
+Run: `cd backend && mvn -B clean test 2>&1 | grep -E "Tests run: [0-9]+, F.*$|BUILD" | tail -2`
+Expected: `BUILD SUCCESS`, and the total includes the 4 new tests (Maven's default includes pick up `*Test` classes).
 
 ```bash
 git add backend/src/test/java/com/huntingmrxwellington/property
-git commit -m "test(property): jqwik invariants over random games; fuzzing moves, names and request bodies
+git commit -m "test(property): invariants over 300 seeded random games; fuzzing moves, names and request bodies
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -6036,7 +6082,7 @@ mvn test-compile org.pitest:pitest-maven:mutationCoverage  # mutation testing; r
 | Lifecycle | `service/GameLifecycleTest` |
 | Integration | `controller/ApiIntegrationTest` (HTTP), `controller/WebSocketIntegrationTest` (STOMP) |
 | Functional | `e2e/FullGameE2ETest` (full games over HTTP and STOMP) |
-| Property-based and fuzz | `property/GameInvariantProperties`, `property/ApiFuzzProperties` (jqwik) |
+| Property-based and fuzz | `property/GamePropertyTest`, `property/ApiFuzzTest` (JUnit, seeded random) |
 | Performance | `perf/MultiplayerPerfTest` (opt-in) |
 
 No browser or driver is needed for any of them.
@@ -6210,7 +6256,7 @@ Use the Task 12 output. To refresh it: `cd backend && mvn -B test -Dgroups=perf 
    - **B5:** `GameTest.DoubleMoves.aPlainDoubleTicketIsRejected`, `ApiIntegrationTest.badMoveRequestsAre400NotServerErrors`
    - **B6:** `GameTest.Leaving.theHostLeavingTheLobbyEndsItForEveryone`, `GameLifecycleTest.theHostLeavingTheLobbyClosesItForEveryone`
    - **B7:** `GameServiceTest.concurrentJoinsNeverOverfillAGame`
-   - **B8:** `ApiIntegrationTest.badCreateRequestsAre400WithAnErrorMessage`, `ApiIntegrationTest.badMoveRequestsAre400NotServerErrors`, `ApiFuzzProperties.noRequestCausesAServerError`
+   - **B8:** `ApiIntegrationTest.badCreateRequestsAre400WithAnErrorMessage`, `ApiIntegrationTest.badMoveRequestsAre400NotServerErrors`, `ApiFuzzTest.noRequestCausesAServerError`
 4. In B2, replace item 5 with whichever sentence matches what the Task 8 red run showed:
    - The fake state was delivered: `5. Clients could send messages straight to /topic/..., and the broker delivered them to subscribers as if the server had sent them. Confirmed by WebSocketIntegrationTest.clientsCannotPublishToTopics failing before the fix.`
    - The fake state was not delivered: `5. A client SEND to /topic/... was checked with WebSocketIntegrationTest.clientsCannotPublishToTopics and was not delivered even before the fix; the server now drops client SEND frames anyway, since clients never need to send.`
@@ -6238,11 +6284,11 @@ Use the numbers from Steps 1–4, and write `~` before `X` in "Mr~X" as the file
 - **Line 106:** `\item Phases: Lobby, InProgress (MrXTurn, DetectiveTurn, RoundEnd), ended states (detectives win, Mr~X wins, aborted); the lobby closes if the host leaves (figure from \texttt{plans/states-diagrams.md}).`
 - **Line 108:** `\item Leaving and idling: any player leaving a game in progress aborts it, and the server aborts a game after 15 minutes without a move. Pause-on-disconnect with a 60 s grace period was planned but dropped: user-testing networks dropped WebSockets often, so clients reconnect and re-sync over REST instead of the server pausing.`
 - **Line 112:** `\item Player model: one \texttt{Player} class whose role is assigned at start; every rule lives in a plain \texttt{Game} class with no Spring, which made the rules directly unit-testable (the earlier lobby/Mr~X/detective class hierarchy and abstract player were collapsed in the backend rewrite).`
-- **Line 171:** `\item Test suite: <total> backend tests: unit (\texttt{MapGraph}, \texttt{Player}, \texttt{Game} on hand-drawn boards), mock (\texttt{GameService} with mocked messaging), lifecycle (scripted complete games), integration (HTTP via MockMvc, STOMP with real clients), functional (full games over HTTP and STOMP), property-based and fuzz (jqwik), and performance (opt-in); mapped to the proposal's plan.`
+- **Line 171:** `\item Test suite: <total> backend tests: unit (\texttt{MapGraph}, \texttt{Player}, \texttt{Game} on hand-drawn boards), mock (\texttt{GameService} with mocked messaging), lifecycle (scripted complete games), integration (HTTP via MockMvc, STOMP with real clients), functional (full games over HTTP and STOMP), property-based and fuzz (JUnit, seeded random), and performance (opt-in); mapped to the proposal's plan.`
 - **Line 172:** `\item Table of layers, counts and what each catches (counts from the \texttt{mvn test} run in \texttt{documentation/backend-fixes.md}).`
 - **Line 173:** `\item Targeted tests: every bug found in the backend review has a regression test (\texttt{documentation/backend-fixes.md}), e.g.\ Mr~X boxed in, chained double moves, hidden position not leaked over REST or STOMP.`
 - **Line 174:** `\item Full-game end-to-end test through the real server with an HTTP and a STOMP client for every player (it replaced a Selenium test that only used the browser as an HTTP client and was flaky).`
-- **Line 175:** `\item Meta-testing: JaCoCo coverage <line>\% lines and <branch>\% branches overall (game and service: <core line>\% and <core branch>\%); PIT mutation score <killed>\% on game and service; jqwik property tests (random legal games keep every rule and always end) and fuzz tests (garbage moves, names and request bodies never cause a server error). Frontend has no automated tests.`
+- **Line 175:** `\item Meta-testing: JaCoCo coverage <line>\% lines and <branch>\% branches overall (game and service: <core line>\% and <core branch>\%); PIT mutation score <killed>\% on game and service; property-based tests over 300 seeded random games (every rule holds and every game ends) and fuzz tests (garbage moves, names and request bodies never cause a server error). Frontend has no automated tests.`
 - **Line 180:** `\item Latency harness (\texttt{MultiplayerPerfTest}): 10 concurrent games of 6 players on the real map; move submitted to every other player updated p50 <a> ms, p95 <b> ms, max <c> ms, against the 500 ms target. A render-time measurement with the real map is still to do.`
 - **Line 201**, append to the bullet before its final period: `; the backend rewrite into a plain rules core plus a thin Spring service (rules directly unit-testable, eight bugs fixed with regression tests)`.
 - **Line 203:** change `no authentication` to `no accounts (per-player secret tokens instead)`.
@@ -6291,7 +6337,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 | §5 tokens, header, 403, public view on unknown token for GET, token-named topics, frontend | 6, 7, 9 |
 | §5 exact-match subscriptions, client SEND dropped | 8 |
 | B7 locking; B8 400s | 6, 7 |
-| §6 test categories, JaCoCo, PIT, jqwik, perf; no reflection or sleeps | 1, 2–12 |
+| §6 test categories, JaCoCo, PIT, property and fuzz (JUnit), perf; no reflection or sleeps | 1, 2–12 |
 | §7 docs incl. class diagram, flowcharts, report bullets, fixes doc | 13, 14 |
 | §9 done-when: suite, perf, PIT, build, smoke test, targets reported | 12, 14 |
 

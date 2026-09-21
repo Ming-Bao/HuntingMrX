@@ -117,7 +117,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 
 **Fix:** requests are validated at the controller and service boundary. Missing, blank or malformed fields get a 400 with an `{error}` message, and malformed JSON gets the same treatment.
 
-**Tests:** `ApiIntegrationTest`; the jqwik fuzz tests send random JSON to every endpoint and check none of them returns a 500.
+**Tests:** `ApiIntegrationTest`; the fuzz test (`ApiFuzzTest`) sends random JSON to every endpoint and checks that none of them returns a 500.
 
 ## Other fixes
 
@@ -127,7 +127,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 | Detective ticket counts are defined in three places with two different sets of values (12/8/6/2 in `application.properties`; 10/8/4/2 in the `@Value` defaults and `backend/doc.md`). | One source of truth: `application.properties`, read through a single settings record. |
 | `MapGraph` silently drops any edge with an unrecognised transport mode. If the map ever had two edges between the same pair of nodes, only the first edge's modes would count. | An unknown mode stops the server at startup with a clear error, and modes on duplicate edges are merged. |
 | `MapController` reads the 1.8 MB map from disk on every request. | The map is read once at startup and served from memory. |
-| A name made only of control characters (such as U+0000) passes the blank check, then `trim()` strips it down to an empty name. | Names are checked after `strip()`, which uses the same whitespace rule as the blank check. The jqwik name property covers it. |
+| A name made only of control characters (such as U+0000) passes the blank check, then `trim()` strips it down to an empty name. | Names are checked after `strip()`, which uses the same whitespace rule as the blank check. The name fuzz test in `GamePropertyTest` covers it. |
 | `backend/doc.md` says Spring Boot 3.5 and `POST /api/games`; the OpenAPI spec says port 8080 and lists valid-moves errors that never happen; the README says the map has 261 nodes (it has 216). | Corrected along with the rest of the docs. |
 
 ## Test suite fixes
@@ -138,7 +138,7 @@ Code references point at commit `88bf636`, the last commit before the rewrite. P
 | The Selenium test only used Firefox to send HTTP requests, didn't test the UI, and was flaky because of B1. | Replaced by a browserless full-game test that uses real HTTP and STOMP clients and checks the game's invariants after every move. |
 | Nothing tested the WebSocket side, including the role filtering that hides Mr X. | `WebSocketIntegrationTest` with real STOMP clients. |
 | About 15 tests duplicated others and about 10 only checked getters. Tests reached into private fields with reflection. | Removed or rewritten. No reflection in the new suite. |
-| None of the coverage, mutation, fuzz, property-based or performance testing promised in the proposal existed. | JaCoCo coverage on every run, PIT mutation testing on demand, jqwik property and fuzz tests, and an opt-in multiplayer latency test. |
+| None of the coverage, mutation, fuzz, property-based or performance testing promised in the proposal existed. | JaCoCo coverage on every run, PIT mutation testing on demand, property-based and fuzz tests (plain JUnit, seeded random), and an opt-in multiplayer latency test. |
 
 ## Behaviour changes players will notice
 

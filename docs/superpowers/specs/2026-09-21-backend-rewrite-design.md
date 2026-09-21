@@ -44,7 +44,7 @@ Each bug gets a named regression test. Root causes, fixes and status for each on
 |---|---|
 | API | Change only what the fixes need: a secret player token, and plain `DOUBLE` is dropped. Frontend and openapi.yaml are updated to match. |
 | Timers | Keep the idle abort, configurable via `game.turn-timer-seconds` = 900. Drop pause, grace and `PAUSED`, and fix the docs and report. |
-| Meta-testing | JaCoCo, PIT, jqwik (property + fuzz), and an opt-in performance harness |
+| Meta-testing | JaCoCo, PIT, property-based and fuzz tests in plain JUnit with seeded randomness, and an opt-in performance harness. (jqwik was the first choice; it was dropped because its maintainers ask AI agents not to use it.) |
 | E2E | Replace Selenium with a browserless REST + STOMP full-game test |
 | Structure | Approach A: a plain rules core (`Game`) and a thin Spring service |
 | Leaving | Any player leaving an in-progress game ends it. The host leaving the lobby ends the lobby. A non-host leaving the lobby is just removed. |
@@ -178,15 +178,14 @@ Comparisons against public IDs (`isHost`, `isMyTurn`, `stillInGame`) are unchang
 | Integration | `controller/ApiIntegrationTest` | the real app through MockMvc, no mocks: statuses and `{error}` bodies for every endpoint, token rules, 400 not 500 on bad input (B8), token in create/join, never in `GameState` |
 | Integration | `controller/WebSocketIntegrationTest` | real server, real STOMP clients: lobby broadcast, filtered per-player state, valid-moves push; a wildcard subscription receives nothing and a client SEND is rejected (B2) |
 | Functional | `e2e/FullGameE2ETest` | real server, HTTP and STOMP clients for every player, complete 2- and 4-player games on `test-map.json`: invariants after every move, the winner matches the final board, turn enforcement, abort on leave |
-| Property + fuzz | `property/GameInvariantProperties` (jqwik) | random legal games on `map.json` with 2–6 players: Mr X never shares a node with a detective, tickets never negative, exactly one current player, round 1–24, every game ends, detectives never see Mr X outside a reveal. Fuzz: random tickets, nodes and names raise only the expected exceptions; random JSON to every endpoint never gives a 500 |
+| Property + fuzz | `property/GamePropertyTest`, `property/ApiFuzzTest` (JUnit, seeded random) | random legal games on `map.json` with 2–6 players: Mr X never shares a node with a detective, tickets never negative, exactly one current player, round 1–24, every game ends, detectives never see Mr X outside a reveal. Fuzz: random tickets, nodes and names raise only the expected exceptions; random JSON to every endpoint never gives a 500 |
 | Performance | `perf/MultiplayerPerfTest`, `@Tag("perf")`, opt-in | K concurrent games with a STOMP client per player: prints a table of move-submit → broadcast latency (p50/p95/max); every game ends in a consistent state |
 
 **Tooling (pom.xml):**
 - JaCoCo `prepare-agent` + `report` on every `mvn test` (writes `target/site/jacoco/`).
 - PIT 1.30.0 with `pitest-junit5-plugin` 1.2.3, on demand, targeting `game` and `service` and excluding the server-based tests.
-- jqwik 1.10.1 (test scope).
 - Surefire excludes the `perf` tag by default.
-- The spike on 2026-09-21 confirmed jqwik and PIT both run on Boot 4.0.6 / JUnit 6.0.3.
+- The spike on 2026-09-21 confirmed PIT runs on Boot 4.0.6 / JUnit 6.0.3.
 
 **Rules for the tests:**
 - Every bug B1–B8 has a named regression test.
