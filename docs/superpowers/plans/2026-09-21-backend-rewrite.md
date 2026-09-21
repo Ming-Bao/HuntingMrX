@@ -756,7 +756,10 @@ import java.util.Map;
 import java.util.Random;
 
 import static com.huntingmrxwellington.game.TicketType.*;
-import static org.assertj.core.api.Assertions.*;
+// Explicit AssertJ imports: Assertions.* also brings in a DOUBLE constant that clashes with TicketType.DOUBLE.
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Every rule of the game, on the hand-drawn board in TestMaps with players on exact nodes. */
 class GameTest {
