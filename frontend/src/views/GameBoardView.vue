@@ -224,9 +224,9 @@ async function applyState(state: GameStateDTO): Promise<void> {
     router.push(`/game/${gameId.value}/end`)
     return
   }
-  if (state.currentPlayerId === store.playerId && state.phase === 'IN_PROGRESS' && gameId.value && store.playerId) {
+  if (state.currentPlayerId === store.playerId && state.phase === 'IN_PROGRESS' && gameId.value && store.playerToken) {
     try {
-      const moves = await getValidMoves(gameId.value, store.playerId)
+      const moves = await getValidMoves(gameId.value, store.playerToken)
       store.setValidMoves(moves)
     } catch { /* leave whatever valid-moves were already in the store */ }
   }
@@ -236,14 +236,14 @@ async function applyState(state: GameStateDTO): Promise<void> {
 // connectWs's onConnect for why re-running this on reconnect matters, not
 // just at first load.
 async function syncFromServer(): Promise<void> {
-  if (!store.playerId || !gameId.value || gameId.value === 'preview') return
+  if (!store.playerToken || !gameId.value || gameId.value === 'preview') return
   try {
-    await applyState(await getGame(gameId.value, store.playerId))
+    await applyState(await getGame(gameId.value, store.playerToken))
   } catch { /* use whatever was already in the store */ }
 }
 
 function connectWs() {
-  if (!store.playerId || gameId.value === 'preview') return
+  if (!store.playerToken || gameId.value === 'preview') return
 
   stompClient = new Client({
     webSocketFactory: () => new SockJS(WS_PATH),
@@ -258,7 +258,7 @@ function connectWs() {
 
       // Per-player state topic
       stompClient!.subscribe(
-        `/topic/games/${gameId.value}/players/${store.playerId}`,
+        `/topic/games/${gameId.value}/players/${store.playerToken}`,
         msg => {
           const state = JSON.parse(msg.body)
           store.updateGameState(state)
@@ -270,7 +270,7 @@ function connectWs() {
       )
       // Valid moves pushed by server when it becomes this player's turn
       stompClient!.subscribe(
-        `/topic/games/${gameId.value}/players/${store.playerId}/valid-moves`,
+        `/topic/games/${gameId.value}/players/${store.playerToken}/valid-moves`,
         msg => {
           const data = JSON.parse(msg.body)
           store.setValidMoves(data ?? [])
@@ -400,9 +400,9 @@ watch(
 watch(
   () => store.isMyTurn,
   async (nowMyTurn) => {
-    if (nowMyTurn && store.validMoves.length === 0 && gameId.value && store.playerId) {
+    if (nowMyTurn && store.validMoves.length === 0 && gameId.value && store.playerToken) {
       try {
-        const moves = await getValidMoves(gameId.value, store.playerId)
+        const moves = await getValidMoves(gameId.value, store.playerToken)
         store.setValidMoves(moves)
       } catch { /* ignore */ }
     }
@@ -420,7 +420,7 @@ function handleSelectNode(node: GraphNode | null) {
 }
 
 async function confirmMove() {
-  if (!selectedNode.value || !selectedTicket.value || !store.playerId || !gameId.value) return
+  if (!selectedNode.value || !selectedTicket.value || !store.playerToken || !gameId.value) return
   const nodeId = selectedNode.value.id
   const ticket = doubleMode.value ? `DOUBLE_${selectedTicket.value}` : selectedTicket.value
   submitting.value = true
@@ -437,7 +437,7 @@ async function confirmMove() {
     // network hiccups causing the WebSocket issues elsewhere in this app)
     // could leave our own screen showing stale state even though the move
     // went through fine server-side.
-    await applyState(await submitMove(gameId.value, store.playerId, nodeId, ticket))
+    await applyState(await submitMove(gameId.value, store.playerToken, nodeId, ticket))
   } catch (e) {
     moveError.value = e instanceof Error ? e.message : 'Move failed'
   } finally {
@@ -447,10 +447,11 @@ async function confirmMove() {
 
 async function handleLeave() {
   stompClient?.deactivate()
-  const id  = gameId.value
-  const pid = store.playerId
-  if (id && pid && id !== 'preview') {
-    try { await leaveGame(id, pid) } catch { /* ignore */ }
+  const id    = gameId.value
+  const pid   = store.playerId
+  const token = store.playerToken
+  if (id && pid && token && id !== 'preview') {
+    try { await leaveGame(id, token, pid) } catch { /* ignore */ }
   }
   store.clearGame()
   router.push('/')

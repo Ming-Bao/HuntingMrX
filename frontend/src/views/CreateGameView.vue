@@ -49,7 +49,7 @@ async function handleCreate() {
   error.value = ''
   try {
     const result = await createGame(hostName.value.trim(), maxPlayers.value)
-    store.setGame(result.gameState.gameId, result.playerId, result.gameState)
+    store.setGame(result.gameState.gameId, result.playerId, result.playerToken, result.gameState)
     router.push(`/lobby/${result.gameState.gameId}`)
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'Failed to create game'

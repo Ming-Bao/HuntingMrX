@@ -1,6 +1,16 @@
 import type { GameStateDTO, MapData, ValidMoveDTO } from "../types/game";
 import { API_BASE } from "../utils/basePath";
 
+// The secret per-player token proves who is acting. The public playerId is only for
+// display and turn checks, so knowing someone's id no longer lets you act as them.
+const TOKEN_HEADER = "X-Player-Token";
+
+export interface JoinResponse {
+    playerId: string;
+    playerToken: string;
+    gameState: GameStateDTO;
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Request failed");
@@ -14,10 +24,7 @@ async function handleNoContent(res: Response): Promise<void> {
     }
 }
 
-export async function createGame(
-    hostName: string,
-    maxPlayers: number,
-): Promise<{ playerId: string; gameState: GameStateDTO }> {
+export async function createGame(hostName: string, maxPlayers: number): Promise<JoinResponse> {
     const res = await fetch(`${API_BASE}/games/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -26,10 +33,7 @@ export async function createGame(
     return handleResponse(res);
 }
 
-export async function joinGame(
-    joinCode: string,
-    playerName: string,
-): Promise<{ playerId: string; gameState: GameStateDTO }> {
+export async function joinGame(joinCode: string, playerName: string): Promise<JoinResponse> {
     const res = await fetch(`${API_BASE}/games/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -38,52 +42,50 @@ export async function joinGame(
     return handleResponse(res);
 }
 
-export async function getGame(gameId: string, playerId?: string): Promise<GameStateDTO> {
-    const url = playerId ? `${API_BASE}/games/${gameId}?playerId=${playerId}` : `${API_BASE}/games/${gameId}`;
-    const res = await fetch(url);
+export async function getGame(gameId: string, playerToken?: string): Promise<GameStateDTO> {
+    const res = await fetch(`${API_BASE}/games/${gameId}`, {
+        headers: playerToken ? { [TOKEN_HEADER]: playerToken } : {},
+    });
     return handleResponse(res);
 }
 
-export async function startGame(gameId: string, playerId: string): Promise<GameStateDTO> {
+export async function startGame(gameId: string, playerToken: string): Promise<GameStateDTO> {
     const res = await fetch(`${API_BASE}/games/${gameId}/start`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerId }),
+        headers: { [TOKEN_HEADER]: playerToken },
     });
     return handleResponse(res);
 }
 
-export async function leaveGame(gameId: string, playerId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/games/${gameId}/players/${playerId}`, {
-        method: "DELETE",
-    });
-    return handleNoContent(res);
-}
-
-export async function kickPlayer(gameId: string, hostId: string, targetPlayerId: string): Promise<void> {
+// Removing yourself is leaving; the host removing someone else is a kick.
+async function removePlayer(gameId: string, playerToken: string, targetPlayerId: string): Promise<void> {
     const res = await fetch(`${API_BASE}/games/${gameId}/players/${targetPlayerId}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requesterId: hostId }),
+        headers: { [TOKEN_HEADER]: playerToken },
     });
     return handleNoContent(res);
 }
 
-export async function getValidMoves(gameId: string, playerId: string): Promise<ValidMoveDTO[]> {
-    const res = await fetch(`${API_BASE}/games/${gameId}/valid-moves?playerId=${playerId}`);
+export const leaveGame = removePlayer;
+export const kickPlayer = removePlayer;
+
+export async function getValidMoves(gameId: string, playerToken: string): Promise<ValidMoveDTO[]> {
+    const res = await fetch(`${API_BASE}/games/${gameId}/valid-moves`, {
+        headers: { [TOKEN_HEADER]: playerToken },
+    });
     return handleResponse(res);
 }
 
 export async function submitMove(
     gameId: string,
-    playerId: string,
+    playerToken: string,
     toNodeId: number,
     ticket: string,
 ): Promise<GameStateDTO> {
     const res = await fetch(`${API_BASE}/games/${gameId}/moves`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerId, toNodeId, ticket }),
+        headers: { "Content-Type": "application/json", [TOKEN_HEADER]: playerToken },
+        body: JSON.stringify({ toNodeId, ticket }),
     });
     return handleResponse(res);
 }

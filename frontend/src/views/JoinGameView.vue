@@ -58,7 +58,7 @@ async function handleJoin() {
   error.value = ''
   try {
     const result = await joinGame(joinCode.value, playerName.value.trim())
-    store.setGame(result.gameState.gameId, result.playerId, result.gameState)
+    store.setGame(result.gameState.gameId, result.playerId, result.playerToken, result.gameState)
     router.push(`/lobby/${result.gameState.gameId}`)
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'Failed to join game'

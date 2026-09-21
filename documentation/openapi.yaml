@@ -4,37 +4,50 @@ info:
   description: |
     REST API for the Hunting Mr. X: Wellington Edition multiplayer game backend.
 
+    ## Player tokens
+
+    Creating or joining a game returns a public `playerId` and a secret
+    `playerToken`. The id is shown to everyone (in `players[]` and
+    `currentPlayerId`). The token is returned only in that one response and
+    never appears in any other response or broadcast. Every call that acts
+    as a player sends it in the `X-Player-Token` header.
+
     ## Real-time updates (WebSocket / STOMP)
 
     The backend also exposes a STOMP-over-SockJS endpoint at `/ws`.
-    Clients connect using `@stomp/stompjs` + `sockjs-client`.
+    Clients connect using `@stomp/stompjs` + `sockjs-client`. After every
+    change to a game the server publishes to the topics below.
 
-    **Lobby topic** — subscribe after joining or creating a game:
+    **Lobby topic:** subscribe after joining or creating a game.
     ```
     /topic/games/{gameId}
     ```
-    Published after `join`, `kick`, and `leave` (lobby phase only).
+    Carries the public view: Mr X's `nodeId` is hidden except in a reveal round after his move.
 
-    **Per-player topic** — subscribe on game board mount using the player's own ID:
+    **Per-player topic:** subscribe on game board mount with your own token.
     ```
-    /topic/games/{gameId}/players/{playerId}
+    /topic/games/{gameId}/players/{playerToken}
     ```
-    Published after every in-progress state change. Role-filtered: Mr X's
-    `nodeId` is hidden from detectives except on reveal rounds (2, 8, 13, 18, 24).
+    Your own role-filtered view. Mr X sees everything; detectives see Mr X's
+    `nodeId` only in a reveal round (2, 8, 13, 18, 24) after his move.
 
-    **Valid moves topic** — subscribe alongside the per-player topic:
+    **Valid moves topic:** subscribe alongside the per-player topic.
     ```
-    /topic/games/{gameId}/players/{playerId}/valid-moves
+    /topic/games/{gameId}/players/{playerToken}/valid-moves
     ```
-    Published at the start of a player's turn. Each entry lists a reachable
-    `nodeId` and the `ticketOptions` the player may use to reach it.
+    Sent only to the player whose turn it is. Each entry lists a reachable
+    `nodeId` and the `ticketOptions` that pay for it.
 
-    **Kick detection** — a client should check on each push whether
-    their own `playerId` is still present in `players`. If it is not
-    and `phase` is still `LOBBY`, the client was kicked.
-  version: 0.1.11
+    The broker only matches exact destinations, so a wildcard subscription
+    such as `/topic/games/{gameId}/players/**` receives nothing, and any SEND
+    frame from a client is dropped. Clients only ever subscribe.
+
+    **Kick detection:** a client should check on each push whether its own
+    `playerId` is still present in `players`. If it isn't and `phase` is
+    still `LOBBY`, the client was kicked.
+  version: 0.1.12
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8999
     description: Local development server
 
 paths:
@@ -64,7 +77,10 @@ paths:
   /api/games/create:
     post:
       summary: Create a new game
-      description: Creates a new game session. The caller becomes the host. Returns the host's player ID and the initial game state.
+      description: |
+        Creates a new game session. The caller becomes the host (the first
+        player in the lobby). Returns the host's public id, their secret
+        token and the initial game state. Nothing is broadcast.
       operationId: createGame
       requestBody:
         required: true
@@ -81,24 +97,23 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreateGameResponse'
+                $ref: '#/components/schemas/JoinResponse'
         '400':
-          description: Validation failure — host name blank or maxPlayers out of range (2–6)
+          description: Name blank or over 20 characters, maxPlayers outside 2 to 6, or a malformed body
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
-                error: Game not created
+                error: Name is required
 
   /api/games/join:
     post:
       summary: Join an existing game
       description: |
-        Joins a LOBBY-phase game identified by its join code. Returns the joining
-        player's ID and the updated game state. Also broadcasts the updated
-        `GameState` to `/topic/games/{gameId}` so all lobby subscribers see
-        the new player immediately.
+        Joins a LOBBY-phase game by its join code (case-insensitive). Returns
+        the new player's public id, their secret token and the game state,
+        and broadcasts the updated state to the game's topics.
       operationId: joinGame
       requestBody:
         required: true
@@ -115,9 +130,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JoinGameResponse'
+                $ref: '#/components/schemas/JoinResponse'
         '400':
-          description: Validation failure — join code or player name blank
+          description: Join code or player name blank, name over 20 characters, or a malformed body
           content:
             application/json:
               schema:
@@ -133,7 +148,7 @@ paths:
               example:
                 error: Game not found
         '409':
-          description: Game is not accepting new players — either not in LOBBY phase or already full
+          description: The game has started or is full
           content:
             application/json:
               schema:
@@ -152,23 +167,17 @@ paths:
     get:
       summary: Get game state
       description: |
-        Returns the current state of a game. When `playerId` is supplied the
-        response is role-filtered: Mr X's `nodeId` is hidden from detectives on
-        non-reveal rounds, and `mrXLog` entries omit the node on non-reveal legs.
-        Omit `playerId` for an unfiltered view (lobby use, spectators).
+        Returns the game as the caller may see it. With a valid
+        `X-Player-Token` it is that player's view (Mr X sees his own
+        position). With a missing or unknown token it is the public view,
+        never an error, so a kicked player's poll can still see they're gone.
       operationId: getGame
       parameters:
         - $ref: '#/components/parameters/GameId'
-        - name: playerId
-          in: query
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: If supplied, response is role-filtered for this player
+        - $ref: '#/components/parameters/OptionalPlayerToken'
       responses:
         '200':
-          description: Current game state (role-filtered when playerId provided)
+          description: Current game state for this caller
           content:
             application/json:
               schema:
@@ -186,36 +195,31 @@ paths:
     post:
       summary: Start the game
       description: |
-        Transitions the game from `LOBBY` to `IN_PROGRESS`. Only the host may
-        call this. Requires at least 2 players.
+        Moves the game from `LOBBY` to `IN_PROGRESS`. Only the host may call
+        this, and it needs at least 2 players.
 
-        One player is randomly assigned `MR_X` (unlimited transport tickets,
-        2 DOUBLE, N BLACK/"Invisible" where N = detective count); the rest
-        become `DETECTIVE` (finite ticket counts from server config).
+        One player is picked at random as `MR_X` (unlimited transport
+        tickets, 2 DOUBLE, one Invisible `BLACK` ticket per detective). The
+        rest become `DETECTIVE` (ticket counts from server config) in a
+        random turn order fixed for the game. Every player gets a distinct
+        random start node. In the rare case that Mr X starts with detectives
+        on every neighbouring node, the game ends at once and the detectives win.
 
-        Broadcasts the updated `GameState` to `/topic/games/{gameId}` — all
-        lobby subscribers detect `phase: IN_PROGRESS` and navigate to the game
-        board.
+        Broadcasts the new state to the game's topics; lobby subscribers see
+        `phase: IN_PROGRESS` and move to the board.
       operationId: startGame
       parameters:
         - $ref: '#/components/parameters/GameId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StartGameRequest'
-            example:
-              playerId: 550e8400-e29b-41d4-a716-446655440000
+        - $ref: '#/components/parameters/PlayerToken'
       responses:
         '200':
-          description: Game started; returns updated state with roles and tickets assigned
+          description: Game started; returns the host's view with roles and tickets assigned
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GameState'
         '400':
-          description: Not enough players (minimum 2 required)
+          description: Not enough players (minimum 2)
           content:
             application/json:
               schema:
@@ -223,7 +227,7 @@ paths:
               example:
                 error: Need at least 2 players to start
         '403':
-          description: Caller is not the host
+          description: Missing or unknown token, or the caller is not the host
           content:
             application/json:
               schema:
@@ -249,30 +253,21 @@ paths:
 
   /api/games/{id}/valid-moves:
     get:
-      summary: Get valid moves for the current player
+      summary: Get the caller's valid moves
       description: |
-        Returns the list of nodes the specified player may move to on their
-        current turn, together with which ticket types they may use on each edge.
+        Returns the nodes the calling player can reach in one leg from where
+        they stand, each with the tickets that would pay for it: matching
+        transport tickets they hold, plus the Invisible ticket (`BLACK`) on
+        any edge if they hold one. Detectives' positions block Mr X. These
+        are the caller's own moves, whoever's turn it is.
 
-        The server checks adjacency, ticket availability, and blocking (detective
-        positions block Mr X). For a DOUBLE first leg, any adjacent non-blocked
-        node is valid regardless of ticket type. For the second leg and normal
-        turns, only edges whose transport mode the player has a ticket for are
-        included.
-
-        The server also pushes this data to
-        `/topic/games/{gameId}/players/{playerId}/valid-moves` at the start of
-        each turn; this REST endpoint is a fallback for clients that missed the push.
+        The server also pushes this to
+        `/topic/games/{gameId}/players/{playerToken}/valid-moves` whenever it
+        is the caller's turn; this endpoint is the fallback.
       operationId: getValidMoves
       parameters:
         - $ref: '#/components/parameters/GameId'
-        - name: playerId
-          in: query
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: UUID of the player requesting their valid moves
+        - $ref: '#/components/parameters/PlayerToken'
       responses:
         '200':
           description: Valid moves computed successfully
@@ -282,51 +277,55 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ValidMove'
-        '400':
-          description: It is not this player's turn
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: Player is not in this game
+          description: Missing or unknown token
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Not a player in this game
         '404':
-          description: Game or player not found
+          description: Game not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Game is not in progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Game is not in progress
 
   /api/games/{id}/moves:
     post:
       summary: Submit a move
       description: |
-        The active player submits their chosen destination node and the ticket
-        they wish to use. The server validates the move (adjacency, ticket
-        availability, turn ownership) and advances the game state.
+        The player whose turn it is moves one leg along an edge and pays with
+        a ticket: a transport ticket matching one of the edge's modes, or the
+        Invisible ticket (`BLACK`, Mr X only) on any edge.
 
-        **Mr X DOUBLE move:** submit with `ticket: "DOUBLE"` to start a double
-        move. The server sets `mrXDoubleMovePending: true` and pushes a new set
-        of valid moves for the second leg. Submit again with the real transport
-        ticket to complete the double move.
+        **Mr X double move:** send `DOUBLE_<ticket>` (e.g. `DOUBLE_BUS`) for
+        the first leg. It spends a DOUBLE ticket plus that ticket, sets
+        `mrXDoubleMovePending: true` and leaves it Mr X's turn; send a plain
+        ticket for the second leg. A bare `DOUBLE`, or a second `DOUBLE_...`
+        while a double is pending, is rejected.
 
-        **Catch check:** after each detective move the server tests whether the
-        detective landed on Mr X's node. If so, `phase` → `ENDED`,
-        `winner: "DETECTIVES"`.
+        **Endings:** a detective landing on Mr X's node ends the game with
+        `winner: "DETECTIVES"`, and so does Mr X having no legal move when his
+        turn starts (every neighbouring node held by a detective). When round
+        24 finishes with Mr X free, `winner: "MR_X"`. Detectives with no legal
+        move are skipped.
 
-        **Round end:** after all detectives have moved, the round counter
-        increments. At round 24 Mr X wins.
-
-        After a successful move the server broadcasts the updated
-        `GameState` to all per-player topics and pushes new valid moves
-        to the next active player.
+        After a successful move the server broadcasts the new state to the
+        game's topics and pushes valid moves to the next player.
       operationId: submitMove
       parameters:
         - $ref: '#/components/parameters/GameId'
+        - $ref: '#/components/parameters/PlayerToken'
       requestBody:
         required: true
         content:
@@ -334,30 +333,39 @@ paths:
             schema:
               $ref: '#/components/schemas/MoveRequest'
             example:
-              playerId: 550e8400-e29b-41d4-a716-446655440000
               toNodeId: 42
               ticket: BUS
       responses:
         '200':
-          description: Move accepted; returns the updated game state (role-filtered for the submitting player)
+          description: Move accepted; returns the mover's view of the new state
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GameState'
         '400':
-          description: Move is invalid (wrong turn, invalid node, insufficient tickets)
+          description: Invalid move (no such edge, wrong or used-up ticket, Mr X onto a detective, bad double) or a malformed body
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Ticket type BUS not valid for this edge
         '403':
-          description: It is not this player's turn
+          description: Missing or unknown token, or not this player's turn
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Not your turn
         '404':
-          description: Game or player not found
+          description: Game not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Game is not in progress
           content:
             application/json:
               schema:
@@ -365,28 +373,23 @@ paths:
 
   /api/games/{id}/players/{targetPlayerId}:
     delete:
-      summary: Remove a player from the game (leave or kick)
+      summary: Remove a player (leave or kick)
       description: |
-        Removes a player from the game. Two authorised callers:
-
-        - **The player themselves** (`targetPlayerId` matches their own ID) —
-          interpreted as a voluntary leave.
-        - **The host** (host sends their `requesterId` in the request body with
-          a different `targetPlayerId`) — interpreted as a kick. Only valid
-          during the LOBBY phase.
+        The caller is identified by their token. If the token's owner is the
+        target, it's a voluntary leave; otherwise it's a kick, which only the
+        host may do and only in the lobby.
 
         **Leave behaviour by phase:**
-        - Lobby, host leaves → game session deleted entirely; no broadcast.
-        - Lobby, non-host leaves → player removed; broadcasts updated state.
-        - In-progress, Mr X leaves → `phase: ENDED`, `abortReason` set;
-          broadcasts final state.
-        - In-progress, detective leaves → player removed; broadcasts updated
-          state.
+        - Lobby, non-host leaves: removed; broadcasts the updated state.
+        - Lobby, host leaves: the lobby closes for everyone (`phase: ENDED`,
+          `abortReason: "The host left the game"`); broadcasts it.
+        - In progress, anyone leaves: the game ends for everyone
+          (`phase: ENDED`, `abortReason` such as `"Alice has left the game"`);
+          broadcasts it.
+        - The last player leaving deletes the game.
 
-        **Kick behaviour:**
-        - Only valid during `LOBBY`. Host cannot kick themselves.
-        - Broadcasts updated `GameState`; kicked client detects removal by
-          checking that their `playerId` is absent from `players`.
+        **Kick behaviour:** broadcasts the updated state; the kicked client
+        notices its `playerId` is gone from `players`.
       operationId: removePlayer
       parameters:
         - $ref: '#/components/parameters/GameId'
@@ -396,22 +399,11 @@ paths:
           schema:
             type: string
             format: uuid
-          description: UUID of the player to remove
-      requestBody:
-        required: false
-        description: |
-          Required only when the host is kicking another player.
-          Omit (or set `requesterId` equal to `targetPlayerId`) for a
-          voluntary leave.
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RemovePlayerRequest'
-            example:
-              requesterId: 550e8400-e29b-41d4-a716-446655440000
+          description: Public id of the player to remove
+        - $ref: '#/components/parameters/PlayerToken'
       responses:
         '204':
-          description: Player removed successfully (no body)
+          description: Player removed (no body)
         '400':
           description: Host attempted to kick themselves
           content:
@@ -421,7 +413,7 @@ paths:
               example:
                 error: Host cannot kick themselves
         '403':
-          description: Caller is not the host (kick attempt only)
+          description: Missing or unknown token, or a non-host tried to kick
           content:
             application/json:
               schema:
@@ -429,15 +421,15 @@ paths:
               example:
                 error: Only the host can kick players
         '404':
-          description: Game or player not found
+          description: Game or target player not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
-                error: Game or player not found
+                error: Player not found
         '409':
-          description: Kick attempted outside of LOBBY phase
+          description: Kick attempted outside the lobby
           content:
             application/json:
               schema:
@@ -457,30 +449,23 @@ webhooks:
 
   lobbyStatePush:
     post:
-      summary: Lobby-phase game state broadcast
+      summary: Public game state broadcast
       description: |
         **STOMP topic:** `/topic/games/{gameId}`
 
-        The server publishes a `GameState` to this topic during the lobby
-        phase after join, kick, and leave operations. Subscribe immediately
-        after creating or joining a game. Unsubscribe once `phase` transitions
-        to `IN_PROGRESS` (switch to the per-player topic instead).
-
-        **Triggered by:**
-        | REST call | What changes |
-        |---|---|
-        | `POST /api/games/join` | New player added to `players` |
-        | `POST /api/games/{id}/start` | `phase` → `IN_PROGRESS`; per-player topics take over |
-        | `DELETE /api/games/{id}/players/{targetPlayerId}` (kick) | Target player removed from `players` |
-        | `DELETE /api/games/{id}/players/{targetPlayerId}` (leave, lobby) | Player removed |
+        The server publishes the public `GameState` here after every change
+        to the game (join, start, move, leave, kick, idle abort). Mr X's
+        `nodeId` is hidden except in a reveal round after his move. The
+        lobby subscribes right after creating or joining a game.
 
         **Client-side reactions:**
-        - `phase === 'IN_PROGRESS'` → navigate to game board; subscribe to per-player topic
-        - Own `playerId` absent from `players` while `phase === 'LOBBY'` → kicked; show banner
+        - `phase === 'IN_PROGRESS'`: navigate to the game board and use the per-player topic
+        - Own `playerId` absent from `players` while `phase === 'LOBBY'`: kicked; show banner
+        - `phase === 'ENDED'` while in the lobby: show `abortReason` (e.g. the host left)
 
-        **Connection:** `new SockJS('/ws')` → STOMP `Client` → subscribe on `onConnect`.
+        **Connection:** `new SockJS('/ws')`, then a STOMP `Client`, then subscribe in `onConnect`.
       requestBody:
-        description: The updated game state pushed by the server.
+        description: The public game state.
         content:
           application/json:
             schema:
@@ -491,34 +476,31 @@ webhooks:
 
   perPlayerGameStatePush:
     post:
-      summary: Per-player in-game state broadcast
+      summary: Per-player game state broadcast
       description: |
-        **STOMP topic:** `/topic/games/{gameId}/players/{playerId}`
+        **STOMP topic:** `/topic/games/{gameId}/players/{playerToken}`
 
-        The server publishes a role-filtered `GameState` to each player's
-        own topic after every in-progress state change (move submission, turn
-        advancement, win/abort). Subscribe on game board mount using the
-        viewer's own `playerId`. The payload hides Mr X's `nodeId` from
-        detectives on non-reveal rounds.
+        The server publishes each player's own role-filtered `GameState` to
+        their private topic after every change to the game. The topic is
+        named by the secret token and the broker matches exact destinations
+        only, so no other client can receive it. Subscribe on game board mount.
 
         **Triggered by:**
         | Event | What changes |
         |---|---|
-        | `POST /api/games/{id}/moves` | Player position updated; turn advanced |
-        | Mr X caught | `phase` → `ENDED`, `winner: "DETECTIVES"` |
+        | `POST /api/games/{id}/start` | Roles, tickets and positions assigned |
+        | `POST /api/games/{id}/moves` | Position updated; turn advanced |
+        | Mr X caught or boxed in | `phase` → `ENDED`, `winner: "DETECTIVES"` |
         | Round 24 complete | `phase` → `ENDED`, `winner: "MR_X"` |
-        | Player leaves in-progress | `phase` → `ENDED`, `abortReason` set |
+        | A player leaves a game in progress | `phase` → `ENDED`, `abortReason` set |
+        | Current player idle past `game.turn-timer-seconds` | `phase` → `ENDED`, `abortReason` set |
 
         **Client-side reactions:**
-        - `phase === 'ENDED'` → navigate to `/game/{id}/end`
-        - `mrXDoubleMovePending === true` → show "second leg" banner; await new valid-moves push
+        - `phase === 'ENDED'`: navigate to `/game/{id}/end`
+        - `mrXDoubleMovePending === true`: show the "second leg" banner and wait for the new valid-moves push
         - Update map markers and ticket counts from the new state
-
-        **Reveal rounds:** 2, 8, 13, 18, 24. On these rounds the final
-        `mrXLog` entry has a non-null `nodeId` and Mr X's position is
-        shown in detective-view responses.
       requestBody:
-        description: Role-filtered game state for the subscribing player.
+        description: This player's view of the game.
         content:
           application/json:
             schema:
@@ -529,25 +511,20 @@ webhooks:
 
   validMovesPush:
     post:
-      summary: Valid moves push at turn start
+      summary: Valid moves for the player whose turn it is
       description: |
-        **STOMP topic:** `/topic/games/{gameId}/players/{playerId}/valid-moves`
+        **STOMP topic:** `/topic/games/{gameId}/players/{playerToken}/valid-moves`
 
-        The server publishes a bare array of `ValidMove` to the active player
-        at the start of their turn (immediately after `startGame` for Mr X;
-        after each move submission for the next player). Subscribe on game
+        After every change while a game is in progress, the server publishes
+        a bare array of `ValidMove` to the player whose turn it is (including
+        Mr X again after the first leg of a double move). Subscribe on game
         board mount alongside the per-player state topic.
 
-        The client uses this array to highlight reachable nodes on the
-        map and populate the ticket-picker. Call
-        `GET /api/games/{id}/valid-moves?playerId={pid}` if the push is missed.
-
-        **Triggered by:**
-        - Game start (pushes to Mr X)
-        - Each accepted move (pushes to the next active player)
-        - DOUBLE first-leg accepted (pushes second-leg moves to Mr X)
+        The client highlights these nodes on the map and fills the ticket
+        picker from them. If the push is missed, call
+        `GET /api/games/{id}/valid-moves` with the token.
       requestBody:
-        description: Valid destinations and ticket options for the active player's turn.
+        description: Valid destinations and ticket options for the current player.
         content:
           application/json:
             schema:
@@ -569,6 +546,24 @@ components:
         type: string
         format: uuid
       description: UUID of the game session
+    PlayerToken:
+      name: X-Player-Token
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The caller's secret `playerToken` from the create or join response.
+    OptionalPlayerToken:
+      name: X-Player-Token
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: |
+        The caller's secret `playerToken`. A valid token gets that player's
+        view; a missing or unknown one gets the public view.
 
   schemas:
 
@@ -579,23 +574,13 @@ components:
         hostName:
           type: string
           minLength: 1
+          maxLength: 20
           description: Display name of the host player
         maxPlayers:
           type: integer
           minimum: 2
           maximum: 6
           description: Total player cap (including Mr X)
-
-    CreateGameResponse:
-      type: object
-      required: [playerId, gameState]
-      properties:
-        playerId:
-          type: string
-          format: uuid
-          description: UUID assigned to the host; must be stored client-side
-        gameState:
-          $ref: '#/components/schemas/GameState'
 
     JoinGameRequest:
       type: object
@@ -605,59 +590,45 @@ components:
           type: string
           minLength: 6
           maxLength: 6
-          pattern: '^[A-Z0-9]{6}$'
-          description: 6-character uppercase join code shown in the lobby
+          description: 6-character join code shown in the lobby (case-insensitive)
         playerName:
           type: string
           minLength: 1
+          maxLength: 20
           description: Display name chosen by the joining player
 
-    JoinGameResponse:
+    JoinResponse:
       type: object
-      required: [playerId, gameState]
+      required: [playerId, playerToken, gameState]
       properties:
         playerId:
           type: string
           format: uuid
-          description: UUID assigned to the joining player; must be stored client-side
-        gameState:
-          $ref: '#/components/schemas/GameState'
-
-    StartGameRequest:
-      type: object
-      required: [playerId]
-      properties:
-        playerId:
-          type: string
-          format: uuid
-          description: UUID of the player requesting the start (must be the host)
-
-    RemovePlayerRequest:
-      type: object
-      properties:
-        requesterId:
+          description: The player's public id, visible to everyone
+        playerToken:
           type: string
           format: uuid
           description: |
-            UUID of the player making the request. Required when the host is
-            kicking another player. Omit for a voluntary leave.
+            The player's secret. Store it client-side and send it as
+            `X-Player-Token`; private STOMP topics are named by it. It never
+            appears in any other response or broadcast.
+        gameState:
+          $ref: '#/components/schemas/GameState'
 
     MoveRequest:
       type: object
-      required: [playerId, toNodeId, ticket]
+      required: [toNodeId, ticket]
       properties:
-        playerId:
-          type: string
-          format: uuid
-          description: UUID of the player submitting the move
         toNodeId:
           type: integer
           description: Destination node ID
         ticket:
-          $ref: '#/components/schemas/TicketType'
+          type: string
+          pattern: '^(DOUBLE_)?(ESCOOTER|BUS|TRAIN|FERRY|BLACK)$'
           description: |
-            Ticket to consume. Use `DOUBLE` to initiate a double move (Mr X only).
-            On the second leg of a double move, provide the real transport ticket.
+            Ticket to spend. Prefix with `DOUBLE_` for the first leg of Mr X's
+            double move (e.g. `DOUBLE_BUS`); a bare `DOUBLE` is rejected.
+            `BLACK` is the Invisible ticket (Mr X only).
 
     ValidMove:
       type: object
@@ -669,36 +640,39 @@ components:
         ticketOptions:
           type: array
           items:
-            type: string
+            $ref: '#/components/schemas/TicketType'
           description: |
-            Ticket types the player may use to reach this node.
-            For Mr X may include `DOUBLE` (on normal turns) and `BLACK`
-            (shown to players as "Invisible").
-            For detectives, only the transport modes of the connecting edge.
+            Tickets the player holds that would pay for this leg: the edge's
+            transport modes, plus `BLACK` (the Invisible ticket) for Mr X if he
+            has one left. Never contains `DOUBLE`; the client adds the
+            `DOUBLE_` prefix itself.
 
-    MrXLogEntryView:
+    MrXMove:
       type: object
-      required: [round, leg, ticketUsed]
+      required: [round, leg, ticketUsed, doubleMove]
       properties:
         round:
           type: integer
-          description: Game round this move occurred in
+          description: Round this leg was played in
         leg:
           type: integer
           enum: [1, 2]
-          description: 1 for a normal move or first leg of a double; 2 for the second leg
+          description: 1 for a normal move or the first leg of a double; 2 for the second leg
         ticketUsed:
           $ref: '#/components/schemas/TicketType'
         nodeId:
           type: integer
           nullable: true
           description: |
-            Mr X's destination node. Non-null only on the final leg of a reveal
-            round (rounds 2, 8, 13, 18, 24). Null on all other entries.
+            Mr X's destination. Non-null only on the final leg of a reveal
+            round (2, 8, 13, 18, 24), the same for every viewer.
+        doubleMove:
+          type: boolean
+          description: True on the first leg of a double move
 
     GameState:
       type: object
-      required: [gameId, joinCode, phase, maxPlayers, players, round]
+      required: [gameId, joinCode, phase, maxPlayers, players, round, mrXLog, mrXDoubleMovePending]
       properties:
         gameId:
           type: string
@@ -717,41 +691,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PlayerView'
+          description: In the lobby, join order (the first is the host); in play, Mr X first then detectives in turn order
         round:
           type: integer
           minimum: 0
-          description: Current round number (0 while in lobby)
+          description: Current round (0 in the lobby, then 1 to 24)
         turnPhase:
           $ref: '#/components/schemas/TurnPhase'
           nullable: true
+          description: Null outside IN_PROGRESS
         currentPlayerId:
           type: string
           format: uuid
           nullable: true
-          description: UUID of the player whose turn it is; null outside IN_PROGRESS
+          description: Public id of the player whose turn it is; null outside IN_PROGRESS
         winner:
-          type: string
+          $ref: '#/components/schemas/Winner'
           nullable: true
-          description: '"MR_X", "DETECTIVES", or null if game is still running'
         abortReason:
           type: string
           nullable: true
-          description: Human-readable reason the game was aborted (e.g. "Mr. X has left the game"); null if not aborted
+          description: Why the game ended without a winner, e.g. "The host left the game" or "Alice has left the game"
         mrXLog:
           type: array
-          nullable: true
           items:
-            $ref: '#/components/schemas/MrXLogEntryView'
-          description: |
-            Chronological log of Mr X's moves. Null during lobby phase.
-            In detective-view responses, `nodeId` is null except on reveal-round entries.
+            $ref: '#/components/schemas/MrXMove'
+          description: Every leg Mr X has played, in order; empty in the lobby
         mrXDoubleMovePending:
           type: boolean
-          description: |
-            True when Mr X has submitted a DOUBLE ticket and the second leg is
-            still outstanding. When true, the valid-moves push for the second leg
-            has already been sent; other players are blocked until the second move
-            is submitted.
+          description: True between the two legs of Mr X's double move
 
     PlayerView:
       type: object
@@ -760,24 +728,25 @@ components:
         id:
           type: string
           format: uuid
+          description: Public player id
         name:
           type: string
         role:
           $ref: '#/components/schemas/Role'
           nullable: true
-          description: Null until game starts
+          description: Null until the game starts
         nodeId:
           type: integer
           nullable: true
-          description: Current map node ID; null until game starts. For Mr X, null in detective-view responses on non-reveal rounds.
+          description: Current node; null until the game starts. Mr X's is null for other viewers unless he was revealed this round.
         tickets:
           type: object
           nullable: true
           description: |
-            Ticket counts keyed by TicketType. Null until game starts.
-            `-1` means unlimited (Mr X transport tickets only).
-            Mr X holds: ESCOOTER(-1), BUS(-1), TRAIN(-1), FERRY(-1), DOUBLE(2), BLACK(N detectives).
-            Detectives hold: ESCOOTER, BUS, TRAIN, FERRY with finite counts from server config. No DOUBLE or BLACK.
+            Ticket counts keyed by TicketType; null until the game starts.
+            `-1` means unlimited (Mr X's transport tickets).
+            Mr X holds: ESCOOTER(-1), BUS(-1), TRAIN(-1), FERRY(-1), DOUBLE(2), BLACK(one per detective).
+            Detectives hold: ESCOOTER, BUS, TRAIN, FERRY with counts from server config; no DOUBLE or BLACK.
           additionalProperties:
             type: integer
           example:
@@ -790,12 +759,11 @@ components:
 
     GamePhase:
       type: string
-      enum: [LOBBY, IN_PROGRESS, PAUSED, ENDED]
+      enum: [LOBBY, IN_PROGRESS, ENDED]
       description: |
-        - `LOBBY`: waiting for players, game not yet started
+        - `LOBBY`: waiting for players
         - `IN_PROGRESS`: game running
-        - `PAUSED`: a player disconnected; grace period active
-        - `ENDED`: game finished (win, loss, or abort)
+        - `ENDED`: finished; `winner` is set, or `abortReason` says why it stopped
 
     TurnPhase:
       type: string
@@ -806,13 +774,16 @@ components:
       type: string
       enum: [MR_X, DETECTIVE]
 
+    Winner:
+      type: string
+      enum: [MR_X, DETECTIVES]
+
     TicketType:
       type: string
       enum: [ESCOOTER, BUS, TRAIN, FERRY, BLACK, DOUBLE]
       description: |
-        `BLACK` is shown to players as the **Invisible** ticket — it lets
-        Mr X travel any edge, any mode, without needing a matching transport
-        ticket or revealing which mode was actually used.
+        `BLACK` is shown to players as the **Invisible** ticket: Mr X can
+        travel any edge with it without revealing the mode he used.
 
     MapData:
       type: object

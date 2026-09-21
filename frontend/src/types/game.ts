@@ -8,7 +8,7 @@ export interface MapData { nodes: GraphNode[]; edges: GraphEdge[] }
 export interface DemoPlayer { name: string; isYou: boolean; role: string; node: number | null; color: string }
 export interface DemoTicket { type: string; label: string; count: number; color: string }
 
-export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'PAUSED' | 'ENDED'
+export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'ENDED'
 export type Role = 'MR_X' | 'DETECTIVE'
 export type TurnPhase = 'MR_X_TURN' | 'DETECTIVE_TURN'
 

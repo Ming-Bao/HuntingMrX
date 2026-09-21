@@ -116,9 +116,9 @@ onMounted(() => {
       // running fine server-side. A REST re-check here means a reconnect
       // (STOMP retries automatically) always catches up regardless of what
       // was missed while disconnected.
-      if (store.playerId) {
+      if (store.playerToken) {
         try {
-          applyState(await getGame(gameId.value, store.playerId))
+          applyState(await getGame(gameId.value, store.playerToken))
         } catch {
           // Ignore — the live subscription below still has a shot at it,
           // and this was just a best-effort catch-up.
@@ -145,9 +145,9 @@ onMounted(() => {
   // currently prompts a re-sync. This bounds that staleness to one poll
   // interval regardless of what the WebSocket layer thinks is happening.
   pollHandle = window.setInterval(async () => {
-    if (!store.playerId || gameId.value === 'preview') return
+    if (!store.playerToken || gameId.value === 'preview') return
     try {
-      applyState(await getGame(gameId.value, store.playerId))
+      applyState(await getGame(gameId.value, store.playerToken))
     } catch { /* best-effort, try again next tick */ }
   }, 6000)
 })
@@ -158,11 +158,11 @@ onUnmounted(() => {
 })
 
 async function handleStart() {
-  if (!store.playerId || !gameId.value) return
+  if (!store.playerToken || !gameId.value) return
   starting.value = true
   startError.value = ''
   try {
-    const state = await startGame(gameId.value, store.playerId)
+    const state = await startGame(gameId.value, store.playerToken)
     store.updateGameState(state)
     router.push(`/game/${gameId.value}`)
   } catch (e: unknown) {
@@ -173,9 +173,9 @@ async function handleStart() {
 }
 
 async function handleKick(targetPlayerId: string) {
-  if (!store.playerId || !gameId.value) return
+  if (!store.playerToken || !gameId.value) return
   try {
-    await kickPlayer(gameId.value, store.playerId, targetPlayerId)
+    await kickPlayer(gameId.value, store.playerToken, targetPlayerId)
   } catch (e: unknown) {
     startError.value = e instanceof Error ? e.message : 'Failed to kick player'
   }
@@ -185,8 +185,9 @@ async function handleLeave() {
   stompClient?.deactivate()
   const id = gameId.value
   const pid = store.playerId
-  if (id && pid && id !== 'preview') {
-    try { await leaveGame(id, pid) } catch { /* ignore */ }
+  const token = store.playerToken
+  if (id && pid && token && id !== 'preview') {
+    try { await leaveGame(id, token, pid) } catch { /* ignore */ }
   }
   store.clearGame()
   router.push('/')

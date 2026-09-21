@@ -16,6 +16,8 @@
 
 **Revision (2026-09-21, after Task 5):** jqwik is dropped. Its engine prints a notice asking AI agents not to use the library, so at the user's request the property-based and fuzz tests (Task 11) use plain JUnit with seeded `java.util.Random`. The executed Task 1 commit (`3db7d6d`) still added jqwik; a later commit removes it. The property test classes are now named `GamePropertyTest` and `ApiFuzzTest`, because Maven's default test includes only pick up class names ending in `Test`.
 
+**Revision (Task 9):** the `openapi.yaml` update (Task 13 Steps 1 and 2) moved into the Task 9 commit. CLAUDE.md requires the spec to change in the same commit as the API, and the repo's pre-commit hook blocks a frontend API change without it. (The hook's backend paths still point at the old package name, which is why the Task 6 to 8 commits weren't stopped.)
+
 ## Global Constraints
 
 - Never write the board game's brand name anywhere (code, tests, docs, commit messages). Say "the board game".
@@ -4693,7 +4695,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 Prose you write here follows the plain-tone rule (no em dashes as punctuation). Existing lines you don't touch stay as they are.
 
-- [ ] **Step 1: `documentation/openapi.yaml`: replace three regions**
+- [x] **Step 1: `documentation/openapi.yaml`: replace three regions** (done in the Task 9 commit)
 
 The anchors are unique lines in the current file. Replace each region, anchors included, with the block given.
 
@@ -5465,7 +5467,7 @@ components:
 
 ```
 
-- [ ] **Step 2: Check the OpenAPI file parses and every `$ref` resolves**
+- [x] **Step 2: Check the OpenAPI file parses and every `$ref` resolves** (done in the Task 9 commit)
 
 Run:
 
