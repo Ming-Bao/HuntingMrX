@@ -180,3 +180,6 @@ yarn-error.log
 
 # Raw SUS survey responses (contains participant emails)
 documentation/user-testing/*.xlsx
+
+
+.remember
