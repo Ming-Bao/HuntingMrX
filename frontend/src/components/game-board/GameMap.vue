@@ -103,6 +103,7 @@ const emit = defineEmits<{
 
 const mapContainer = ref<HTMLDivElement>()
 let map: maplibregl.Map | null = null
+let sizeWatcher: ResizeObserver | null = null
 
 const reachableNodeIds = computed(() => new Set(currentGame.possibleMoves.map(move => move.nodeId)))
 
@@ -574,6 +575,13 @@ onMounted(() => {
   map = newMap
   newMap.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
 
+  // Re-measure the map whenever its box changes size. MapLibre 4.7 watches the
+  // box too, but it ignores the first change it sees, so a map created while
+  // the page was still settling (e.g. in a background tab) stayed stuck at
+  // that early size, leaving most of the map blank until the window resized.
+  sizeWatcher = new ResizeObserver(() => newMap.resize())
+  sizeWatcher.observe(mapContainer.value!)
+
   newMap.on('load', () => {
     addMapLayers()
 
@@ -606,6 +614,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  sizeWatcher?.disconnect()
   map?.remove()
   map = null
 })
