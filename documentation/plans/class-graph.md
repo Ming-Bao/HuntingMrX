@@ -14,7 +14,7 @@ flowchart TB
         app["<b>HuntingMrXApplication</b><br/>entry point, loads the map"]
         controller["<b>controller</b><br/>GameController<br/>MapController<br/>ApiExceptionHandler"]
         service["<b>service</b><br/>GameService"]
-        config["<b>config</b><br/>GameSettings<br/>WebSocketConfig"]
+        config["<b>config</b><br/>GameSettings<br/>WebSocketConfig<br/>PageRoutes"]
         game["<b>game</b><br/><i>plain Java, no Spring</i><br/>Game · Player · MapGraph<br/><br/><b>game.view</b><br/>GameState · PlayerView<br/>MrXMove · ValidMove<br/><br/><b>game.enums</b><br/>GamePhase · TurnPhase<br/>Role · Winner · TicketType<br/><br/><b>game.exception</b><br/>NotFoundException<br/>ForbiddenException<br/>ConflictException"]
     end
 
@@ -296,6 +296,10 @@ classDiagram
             +configureMessageBroker(MessageBrokerRegistry registry) void
             +registerStompEndpoints(StompEndpointRegistry registry) void
             +configureClientInboundChannel(ChannelRegistration registration) void
+        }
+        class PageRoutes {
+            <<Configuration>>
+            +addViewControllers(ViewControllerRegistry registry) void
         }
     }
 

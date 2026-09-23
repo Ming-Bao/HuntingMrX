@@ -10,7 +10,7 @@
 | Backend framework | Java 21 + Spring Boot 4 |
 | Real-time comms | STOMP over SockJS (Spring WebSocket) |
 | Build tools | Vite (frontend), Maven (backend) |
-| Containerisation | Docker (single container, two processes under `supervisord`: Spring Boot on `:8999`, nginx on `:80` serving the built frontend and reverse-proxying `/api` and `/ws` to the backend — see `Dockerfile`, `docker/`) |
+| Containerisation | Docker (single container, one process: Spring Boot on `:8999` serving the API, `/ws` and the built frontend, which the build copies into the jar — see `Dockerfile`, `update-container.sh`) |
 
 ---
 
@@ -167,7 +167,7 @@ Browser (Vue.js + MapLibre GL)
 - All authoritative game state lives in memory on the server. The client holds only a display copy received over REST and WebSocket.
 - The map file is read once at startup and served at `GET /api/map`; the game board fetches it when it mounts.
 - No database in v1. Restarting the server terminates all active games.
-- In the Docker deployment, nginx serves the compiled Vue frontend and reverse-proxies `/api` and `/ws` to Spring Boot in the same container (see the Containerisation row above). For local development, the Vite dev server proxies the same paths instead (`frontend/vite.config.ts`).
+- In the Docker deployment, Spring Boot serves the compiled Vue frontend from its `static/` folder alongside `/api` and `/ws`, and `config/PageRoutes` sends page addresses like `/lobby/ABC123` to `index.html` (see the Containerisation row above). For local development, the Vite dev server serves the frontend and proxies `/api` and `/ws` to the backend (`frontend/vite.config.ts`).
 
 ---
 

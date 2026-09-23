@@ -3,9 +3,9 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 
 // BASE_PATH hosts the site in a sub-folder, e.g. `BASE_PATH=/mrx npm run build`
-// for https://host/mrx/. The backend and docker/render-nginx-conf.sh read the
-// same variable, so all three agree on the address. Vite wants it with exactly
-// one trailing slash ('/mrx/'), hence the tidy-up below.
+// for https://host/mrx/. The backend reads the same variable, so both agree on
+// the address. Vite wants it with exactly one trailing slash ('/mrx/'), hence
+// the tidy-up below.
 const BASE_PATH = process.env.BASE_PATH || ''
 const base = BASE_PATH ? `${BASE_PATH.replace(/\/+$/, '')}/` : '/'
 
@@ -17,12 +17,11 @@ export default defineConfig({
     global: 'globalThis',
   },
   server: {
-    // Dev server: forward API, WebSocket and map requests to the backend on
-    // 8999, under the same prefix.
+    // Dev server: forward API and WebSocket requests to the backend on 8999,
+    // under the same prefix.
     proxy: {
       [`${base}api`]: 'http://localhost:8999',
       [`${base}ws`]: { target: 'http://localhost:8999', ws: true },
-      [`${base}test-map.json`]: 'http://localhost:8999',
     }
   },
   build: {

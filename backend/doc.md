@@ -30,7 +30,7 @@ Settings live in `src/main/resources/application.properties` and nowhere else:
 | Property | Default | Description |
 |---|---|---|
 | `server.port` | `8999` | HTTP port |
-| `server.servlet.context-path` | empty (`${BASE_PATH:}`) | URL prefix for REST and `/ws` when deployed under a path, e.g. `BASE_PATH=/mrx`; the frontend build reads the same variable |
+| `server.servlet.context-path` | empty (`${BASE_PATH:}`) | URL prefix for REST, `/ws` and the bundled frontend when deployed under a path, e.g. `BASE_PATH=/mrx`; the frontend build reads the same variable |
 | `game.map-file` | `map.json` | Board file under `src/main/resources/static/`; `test-map.json` is a 5-node board for quick manual tests |
 | `game.turn-timer-seconds` | `900` | A game is aborted if the current player hasn't moved for this long |
 | `game.detective-escooter-tickets` | `12` | E-scooter tickets per detective |
@@ -46,7 +46,7 @@ Settings live in `src/main/resources/application.properties` and nowhere else:
   - `game/exception/`: the three errors the rules throw, mapped to 404, 403 and 409.
 - `service/GameService`: keeps the live games, locks around every call, checks player tokens, and publishes the new state over STOMP after every change.
 - `controller/`: the REST endpoints and the error-to-status mapping (`ApiExceptionHandler`).
-- `config/`: `GameSettings` (the `game.*` properties) and `WebSocketConfig`.
+- `config/`: `GameSettings` (the `game.*` properties), `WebSocketConfig`, and `PageRoutes`, which forwards the frontend's page addresses (`/lobby/ABC123` and so on) to `index.html`. The Docker build copies the built frontend into `static/`, so the backend serves the whole app.
 - `HuntingMrXApplication`: loads the map once at startup; a missing or invalid map file stops the server from starting.
 
 The full REST and STOMP contract is in `documentation/openapi.yaml`.

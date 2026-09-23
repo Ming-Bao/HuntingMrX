@@ -20,6 +20,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -197,6 +198,14 @@ class ApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(APPLICATION_JSON))
                 .andExpect(jsonPath("$.nodes.length()").value(5));
+    }
+
+    @Test
+    void pageAddressesLoadTheFrontendButApiAddressesDoNot() throws Exception {
+        for (String page : List.of("/create", "/join", "/lobby/ABC123", "/game/abc", "/game/abc/end", "/WXYZ12"))
+            mvc.perform(get(page)).andExpect(status().isOk()).andExpect(forwardedUrl("/index.html"));
+        mvc.perform(get("/api/games/nope")).andExpect(forwardedUrl(null));
+        mvc.perform(get("/WXYZ1")).andExpect(forwardedUrl(null));   // not a 6-character join code
     }
 
     ResultActions create(String body) throws Exception {

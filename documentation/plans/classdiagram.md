@@ -184,6 +184,10 @@ class WebSocketConfig <<Configuration>> {
     client SEND frames dropped
 }
 
+class PageRoutes <<Configuration>> {
+    page addresses forwarded to index.html
+}
+
 GameService "1" --> "0..*" Game : stores, locks
 GameService --> GameSettings
 GameService ..> JoinResponse : creates

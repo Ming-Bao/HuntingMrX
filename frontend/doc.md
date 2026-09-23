@@ -21,7 +21,7 @@ npm install
 npm run dev
 ```
 
-The app starts on `http://localhost:5173`. Requests to `/api/*`, the `/ws` WebSocket and `/test-map.json` are proxied to `http://localhost:8999` automatically, so no CORS configuration is needed in the browser.
+The app starts on `http://localhost:5173`. Requests to `/api/*` and the `/ws` WebSocket are proxied to `http://localhost:8999` automatically, so no CORS configuration is needed in the browser.
 
 ## Build (production)
 
@@ -29,7 +29,7 @@ The app starts on `http://localhost:5173`. Requests to `/api/*`, the `/ws` WebSo
 npm run build
 ```
 
-Output is written to `dist/`. Serve it with any static file server, e.g.:
+Output is written to `dist/`. The Docker image copies it into the backend's `static/` folder, so Spring Boot serves it. For a quick local look:
 
 ```bash
 npm run preview   # Vite's built-in preview server
