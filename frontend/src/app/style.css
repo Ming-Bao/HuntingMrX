@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+/* Dark mode follows a `dark` class on <html> (set in main.ts, toggled by
+   ThemeToggle), not the OS setting. Components pick this variant up through
+   `@reference "…/style.css"` in their <style> blocks. */
+@custom-variant dark (&:is(.dark *));
+
+/* Classes used in more than one place. Utility classes written in a template
+   win over these, so size and layout (w-full, py-3, mb-1…) go where each one
+   is used. */
+@layer components {
+  /* Full-screen centred page (landing, create, join, lobby) and its column */
+  .page {
+    @apply min-h-screen bg-white dark:bg-gray-950 flex flex-col items-center justify-center px-4;
+  }
+  .page-column {
+    @apply w-full max-w-md space-y-6;
+  }
+  .card {
+    @apply bg-gray-100 dark:bg-gray-900 rounded-lg p-6;
+  }
+
+  .button {
+    @apply flex items-center justify-center gap-2 font-medium rounded-lg transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .button-primary {
+    @apply bg-blue-600 hover:bg-blue-700 text-white;
+  }
+  .button-secondary {
+    @apply bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-800 dark:text-white;
+  }
+  /* Bare icon or text button: grey that turns white/black on hover */
+  .icon-button {
+    @apply text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors;
+  }
+
+  .form-label {
+    @apply block mb-1 text-sm text-gray-600 dark:text-gray-400;
+  }
+  .form-input {
+    @apply w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-4 py-2.5 outline-none
+           border border-gray-300 dark:border-transparent
+           focus:ring-2 focus:ring-blue-600 placeholder-gray-400 dark:placeholder-gray-500;
+  }
+  .error-banner {
+    @apply bg-red-900/20 border border-red-700 text-red-400 rounded-lg px-4 py-2.5 text-sm;
+  }
+
+  /* Game board sidebar sections */
+  .panel-section {
+    @apply p-4 border-b border-gray-200 dark:border-gray-800;
+  }
+  .section-label {
+    @apply text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3;
+  }
+
+  /* A clickable transport-ticket pill, used in the sidebar's Reachable Nodes
+     list and the map's node popup. Raised and animated so it reads as a
+     button, not a status label. */
+  .ticket-chip {
+    @apply inline-flex items-center gap-1 text-xs text-white font-semibold
+           px-2 py-1 rounded-full cursor-pointer select-none
+           border border-white/25 shadow-sm shadow-black/30
+           hover:-translate-y-0.5 hover:shadow-md hover:border-white/70 hover:brightness-110
+           active:translate-y-0 active:brightness-95
+           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
+           transition-all duration-150;
+  }
+  .ticket-chip-icon {
+    @apply shrink-0 opacity-90;
+  }
+
+  /* Capped at 24vh so the Reachable Nodes list and the Mr X log fit on screen
+     together. The scrollbar always shows, so it's clear there's more below. */
+  .scroll-list {
+    @apply max-h-[24vh] overflow-y-scroll;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-gray-400) transparent;
+  }
+  .dark .scroll-list {
+    scrollbar-color: var(--color-gray-700) transparent;
+  }
+  /* Safari ignores scrollbar-color, so it gets the same look this way */
+  .scroll-list::-webkit-scrollbar {
+    width: 8px;
+  }
+  .scroll-list::-webkit-scrollbar-thumb {
+    background-color: var(--color-gray-400);
+    border-radius: 9999px;
+  }
+  .dark .scroll-list::-webkit-scrollbar-thumb {
+    background-color: var(--color-gray-700);
+  }
+}

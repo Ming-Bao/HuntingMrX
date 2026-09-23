@@ -1,29 +1,27 @@
 <template>
-  <div class="code-card">
+  <div class="card space-y-3">
     <p class="card-hint">Share this code with players</p>
     <div class="code-row">
       <span class="code-text">{{ code || '——————' }}</span>
-      <button @click="copyCode" class="copy-btn" title="Copy code">
-        <Check v-if="copied" :size="20" class="text-green-500" />
+      <button @click="copy(code, 'code')" class="icon-button shrink-0" title="Copy code">
+        <Check v-if="copied === 'code'" :size="20" class="text-green-500" />
         <ClipboardCopy v-else :size="20" />
       </button>
     </div>
 
-    <!-- Same code as a clickable link — the /:code route pre-fills the join
-         form, so pasting this anywhere (chat, text) is a one-click join. -->
+    <!-- The same code as a link: the /:code route fills in the join form -->
     <div v-if="code" class="link-row">
       <span class="link-text">{{ joinLink }}</span>
-      <button @click="copyLink" class="copy-btn" title="Copy link">
-        <Check v-if="linkCopied" :size="18" class="text-green-500" />
+      <button @click="copy(joinLink, 'link')" class="icon-button shrink-0" title="Copy link">
+        <Check v-if="copied === 'link'" :size="18" class="text-green-500" />
         <ClipboardCopy v-else :size="18" />
       </button>
     </div>
 
-    <!-- Same link again, as a QR code — for a phone in the same room, scanning
-         beats typing a 6-char code or fumbling a shared link. Fixed black-on-
-         white regardless of app theme, since that's what scanners expect. -->
-    <div v-if="qrDataUrl" class="qr-wrap">
-      <img :src="qrDataUrl" :alt="`QR code to join game ${code}`" class="qr-code" />
+    <!-- The same link as a QR code, for phones in the same room. Always black
+         on white whatever the theme, since that's what scanners expect. -->
+    <div v-if="qrImage" class="qr-wrap">
+      <img :src="qrImage" :alt="`QR code to join game ${code}`" class="qr-code" />
       <p class="qr-hint">Scan to join</p>
     </div>
   </div>
@@ -33,53 +31,34 @@
 import { computed, ref, watch } from 'vue'
 import { ClipboardCopy, Check } from 'lucide-vue-next'
 import QRCode from 'qrcode'
-import { BASE_URL } from '../../utils/basePath'
+import { SITE_ADDRESS } from '../../shared/api'
 
 const props = defineProps<{ code: string }>()
-const copied = ref(false)
-const linkCopied = ref(false)
-const qrDataUrl = ref('')
 
-// BASE_URL already carries a trailing slash ('/' or '/mrx/'), so this comes
-// out as e.g. https://host/WXYZ12 or https://host/mrx/WXYZ12 — matching
-// whichever prefix the /:code route above is actually mounted under.
-const joinLink = computed(() => props.code ? `${window.location.origin}${BASE_URL}${props.code}` : '')
+// SITE_ADDRESS ends in '/', so this is e.g. https://host/WXYZ12 or https://host/mrx/WXYZ12
+const joinLink = computed(() => props.code ? `${window.location.origin}${SITE_ADDRESS}${props.code}` : '')
 
+// Drawn at 176 px but shown at 132 px, so it stays sharp on high-density screens
+const qrImage = ref('')
 watch(joinLink, async (link) => {
-  if (!link) { qrDataUrl.value = ''; return }
-  try {
-    qrDataUrl.value = await QRCode.toDataURL(link, {
-      margin: 1,
-      width: 176,
-      color: { dark: '#111827', light: '#ffffff' },
-    })
-  } catch {
-    qrDataUrl.value = ''
-  }
+  qrImage.value = link
+    ? await QRCode.toDataURL(link, { margin: 1, width: 176, color: { dark: '#111827', light: '#ffffff' } }).catch(() => '')
+    : ''
 }, { immediate: true })
 
-async function copyCode() {
-  if (!props.code) return
-  await navigator.clipboard.writeText(props.code)
-  copied.value = true
-  setTimeout(() => { copied.value = false }, 2000)
-}
-
-async function copyLink() {
-  if (!joinLink.value) return
-  await navigator.clipboard.writeText(joinLink.value)
-  linkCopied.value = true
-  setTimeout(() => { linkCopied.value = false }, 2000)
+// Which button shows a tick for 2 s after copying
+const copied = ref<'code' | 'link' | null>(null)
+async function copy(text: string, which: 'code' | 'link') {
+  if (!text) return
+  await navigator.clipboard.writeText(text)
+  copied.value = which
+  setTimeout(() => { copied.value = null }, 2000)
 }
 </script>
 
 <style scoped>
-@reference "tailwindcss";
-@variant dark (&:is(.dark *));
+@reference "../../app/style.css";
 
-.code-card {
-  @apply bg-gray-100 dark:bg-gray-900 rounded-lg p-6 space-y-3;
-}
 .card-hint {
   @apply text-sm text-gray-600 dark:text-gray-400;
 }
@@ -88,9 +67,6 @@ async function copyLink() {
 }
 .code-text {
   @apply text-3xl font-mono font-bold tracking-widest text-gray-900 dark:text-white;
-}
-.copy-btn {
-  @apply text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors shrink-0;
 }
 .link-row {
   @apply flex items-center justify-between gap-3 pt-2 border-t border-gray-200 dark:border-gray-800;

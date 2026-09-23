@@ -1,6 +1,6 @@
 <template>
   <div class="header">
-    <button @click="$emit('back')" class="back-btn">
+    <button @click="$emit('back')" class="icon-button" title="Back">
       <ArrowLeft :size="20" />
     </button>
     <h1 class="title">{{ title }}</h1>
@@ -14,14 +14,10 @@ defineEmits<{ back: [] }>()
 </script>
 
 <style scoped>
-@reference "tailwindcss";
-@variant dark (&:is(.dark *));
+@reference "../app/style.css";
 
 .header {
   @apply flex items-center gap-3;
-}
-.back-btn {
-  @apply text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors;
 }
 .title {
   @apply text-2xl font-bold text-gray-900 dark:text-white;

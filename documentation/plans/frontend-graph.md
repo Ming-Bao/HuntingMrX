@@ -4,107 +4,111 @@ Mermaid diagrams of the Vue frontend in `frontend/src/`, the counterpart of [`cl
 
 ## High-Level Package Diagram
 
-Each box is a folder under `frontend/src/` with the files in it and, in italics, the libraries only it uses. Solid arrows mean "imports from" (the router imports views lazily); dotted arrows are network traffic.
+Each box is a file or folder under `frontend/src/`; `src/` itself holds only `App.vue` and folders. Italics mark libraries that only that box uses; `vue`, `vue-router` and the `lucide-vue-next` icons are used throughout. Solid arrows mean "imports from" (the router loads each page only when it's needed). Dotted arrows are network traffic.
 
 ```mermaid
 flowchart TB
     backend(["Spring Boot backend"])
 
     subgraph src["frontend/src"]
-        root["<b>main.ts · App.vue</b><br/>creates the app, Pinia and the router"]
-        router["<b>router</b><br/>index.ts"]
-        views["<b>views</b><br/>LandingView · CreateGameView<br/>JoinGameView · LobbyView<br/>GameBoardView · GameEndView<br/><i>@stomp/stompjs · sockjs-client</i>"]
-        cgame["<b>components/game</b><br/>GameMap · InfoPanel<br/>MoveSelector · MrXLog · TicketGrid<br/><i>maplibre-gl</i>"]
-        clobby["<b>components/lobby</b><br/>JoinCodeCard · PlayerSlotList<br/><i>qrcode</i>"]
-        cui["<b>components/ui</b><br/>ErrorBanner · FormInput<br/>PageHeader · ThemeToggle"]
-        stores["<b>stores</b> (Pinia)<br/>gameStore · themeStore"]
-        api["<b>api</b><br/>gameApi"]
-        types["<b>types</b><br/>game.ts"]
-        utils["<b>utils</b><br/>basePath · revealRounds<br/>transportModes"]
+        appvue["<b>App.vue</b><br/>theme toggle and RouterView"]
+        app["<b>app/</b><br/>main.ts · router.ts · style.css<br/>starts the app, routes, shared CSS classes"]
+        pages["<b>pages/</b><br/>HomePage · CreateGamePage<br/>JoinGamePage · LobbyPage<br/>GameBoardPage · GameOverPage"]
+        cgame["<b>components/game-board/</b><br/>GameMap · SidePanel<br/>MrXLog · TicketGrid<br/><i>maplibre-gl</i>"]
+        clobby["<b>components/lobby/</b><br/>JoinCodeCard · PlayerList<br/><i>qrcode</i>"]
+        cshared["<b>components/</b><br/>PageHeader · ThemeToggle"]
+        subgraph shared["shared/"]
+            currentgame["<b>current-game.ts</b><br/>what we know about the game"]
+            api["<b>api.ts</b><br/>server requests · keepUpToDate<br/><i>@stomp/stompjs · sockjs-client</i>"]
+            types["<b>types.ts</b>"]
+            tickets["<b>tickets.ts</b><br/>ticket colours, names, icons"]
+        end
     end
 
     api -. "REST /api" .-> backend
-    backend -. "STOMP push over /ws" .-> views
-    root --> router
-    root --> cui
-    root --> stores
-    router -- "lazy import()" --> views
-    views --> cgame
-    views --> clobby
-    views --> cui
-    views --> stores
-    views --> api
-    views --> types
-    views --> utils
+    backend -. "STOMP push over /ws" .-> api
+    app --> appvue
+    appvue --> cshared
+    app -- "router: lazy import()" --> pages
+    pages --> cgame
+    pages --> clobby
+    pages --> cshared
+    pages --> currentGame
+    pages --> api
+    pages --> types
+    cgame --> currentGame
+    cgame --> tickets
     cgame --> types
-    cgame --> utils
+    clobby --> api
     clobby --> types
-    clobby --> utils
-    cui --> stores
-    stores --> types
+    currentGame --> api
+    currentGame --> types
     api --> types
-    api --> utils
 ```
 
 ## Detailed Component Diagram
 
-Vue components are drawn as classes: `+` marks props, `-` local state and functions, `/` computed values, and `«emit»` the events a component emits. Everything in a `<script setup>` block is private except what it exposes; `GameMap.focusNodeId` is the only exposed method. Left out: CSS-class and colour computeds, the popup text helpers in `GameBoardView`, and `GameMap`'s map-drawing internals. The diagram comes in two parts: state, API and types first, then the router, views and components that use them.
+Vue components are drawn as classes: `+` marks props and exports, `-` local state and functions, `/` computed values and getters, and `«emit»` the events a component emits. Everything in a `<script setup>` block is private except what it exposes; `GameMap.showNode` is the only exposed method. Left out: CSS-class computeds and `GameMap`'s map-drawing internals (icons, map data and layers). The diagram comes in two parts: game information, server calls and types first, then the router, pages and components that use them.
 
-### Part 1: state, API and types (`stores`, `api`, `types`, `utils`)
+### Part 1: game information, server and types (`shared/`: `current-game.ts`, `api.ts`, `types.ts`, `tickets.ts`)
 
-`gameStore` keeps `gameId`, `playerId` and `playerToken` in `sessionStorage`; `themeStore` keeps the theme in `localStorage`. `leaveGame` and `kickPlayer` are the same function: `DELETE /api/games/{id}/players/{targetPlayerId}`.
+`currentGame` is a plain Vue `reactive()` object. It keeps `gameId`, `myPlayerId` and `mySecretKey` in `sessionStorage` so a refresh keeps your seat. `api.removePlayer` does both leaving and kicking: `DELETE /api/games/{id}/players/{playerToRemove}`. `JoinResult` keeps the server's own field names (`playerId`, `playerToken`, `gameState`). `keepUpToDate` opens the live connection (STOMP over SockJS), listens on the given channels, asks the server for the whole game again on every (re)connect and every 6 s, and returns a stop function.
 
 ```mermaid
 classDiagram
     direction TB
 
-    class gameStore {
-        <<store>>
-        +gameId : string | null
-        +playerId : string | null
-        +playerToken : string | null
-        +gameState : GameStateDTO | null
-        +validMoves : ValidMoveDTO[]
-        /isMyTurn : boolean
-        /myPlayer : PlayerDTO | null
-        /myRole : Role | null
-        /isMrX : boolean
-        +setGame(gameId: string, playerId: string, playerToken: string, state: GameStateDTO) void
-        +updateGameState(state: GameStateDTO) void
-        +setValidMoves(moves: ValidMoveDTO[]) void
-        +clearGame() void
-    }
-    class themeStore {
-        <<store>>
-        +isDark : boolean
-        +toggle() void
-    }
-    class gameApi {
+    class currentGame {
         <<module>>
-        -TOKEN_HEADER = X-Player-Token
-        +createGame(hostName: string, maxPlayers: number) Promise~JoinResponse~
-        +joinGame(joinCode: string, playerName: string) Promise~JoinResponse~
-        +getGame(gameId: string, playerToken?: string) Promise~GameStateDTO~
-        +startGame(gameId: string, playerToken: string) Promise~GameStateDTO~
-        +leaveGame(gameId: string, playerToken: string, targetPlayerId: string) Promise~void~
-        +kickPlayer(gameId: string, playerToken: string, targetPlayerId: string) Promise~void~
-        +getValidMoves(gameId: string, playerToken: string) Promise~ValidMoveDTO[]~
-        +submitMove(gameId: string, playerToken: string, toNodeId: number, ticket: string) Promise~GameStateDTO~
-        +getMap() Promise~MapData~
+        +gameId : string | null
+        +myPlayerId : string | null
+        +mySecretKey : string | null
+        +info : GameInfo | null
+        +possibleMoves : PossibleMove[]
+        /me : PlayerInfo | null
+        /myRole : Role | null
+        /isMyTurn : boolean
+        +rememberGame(gameId: string, myPlayerId: string, mySecretKey: string, info: GameInfo) void
+        +updateGameInfo(info: GameInfo) void
+        +forgetGame() void
+        +leaveGame() Promise~void~
     }
-    class JoinResponse {
+    class api {
+        <<module>>
+        +SITE_ADDRESS : string
+        -askServer(method: string, path: string, secretKey?: string, body?: unknown) Promise~T~
+        +createGame(hostName: string, maxPlayers: number) Promise~JoinResult~
+        +joinGame(joinCode: string, playerName: string) Promise~JoinResult~
+        +getGame(gameId: string, secretKey: string) Promise~GameInfo~
+        +startGame(gameId: string, secretKey: string) Promise~GameInfo~
+        +removePlayer(gameId: string, secretKey: string, playerToRemove: string) Promise~void~
+        +getPossibleMoves(gameId: string, secretKey: string) Promise~PossibleMove[]~
+        +submitMove(gameId: string, secretKey: string, toNodeId: number, ticket: string) Promise~GameInfo~
+        +getMap() Promise~MapData~
+        +keepUpToDate(channels: Record~string, handler~, refresh: function) function
+    }
+    class tickets {
+        <<module>>
+        +TICKET_COLORS : Record~string, string~
+        +TRANSPORT_TYPES : string[]
+        +TICKET_ORDER : string[]
+        +ticketColor(mode: string) string
+        +ticketName(mode: string) string
+        +ticketIcon(mode: string) LucideIcon
+    }
+    class JoinResult {
         <<interface>>
         +playerId : string
         +playerToken : string
-        +gameState : GameStateDTO
+        +gameState : GameInfo
     }
-    class GameStateDTO {
+    class GameInfo {
         <<interface>>
         +gameId : string
         +joinCode : string
         +phase : GamePhase
         +maxPlayers : number
-        +players : PlayerDTO[]
+        +players : PlayerInfo[]
         +round : number
         +turnPhase : TurnPhase | null
         +currentPlayerId : string | null
@@ -113,7 +117,7 @@ classDiagram
         +mrXLog : MrXLogEntry[]
         +mrXDoubleMovePending : boolean
     }
-    class PlayerDTO {
+    class PlayerInfo {
         <<interface>>
         +id : string
         +name : string
@@ -129,43 +133,36 @@ classDiagram
         +nodeId : number | null
         +doubleMove : boolean
     }
-    class ValidMoveDTO {
+    class PossibleMove {
         <<interface>>
         +nodeId : number
         +ticketOptions : string[]
     }
     class MapData {
         <<interface>>
-        +nodes : GraphNode[]
-        +edges : GraphEdge[]
+        +nodes : MapNode[]
+        +edges : MapConnection[]
     }
-    class GraphNode {
+    class MapNode {
         <<interface>>
         +id : number
         +lat : number
         +lng : number
         +label : string
     }
-    class GraphEdge {
+    class MapConnection {
         <<interface>>
         +from : number
         +to : number
         +modes : string[]
         +coordinates? : Array~number[]~
     }
-    class DemoPlayer {
+    class PlayerMarker {
         <<interface>>
         +name : string
         +isYou : boolean
-        +role : string
+        +role : Role | null
         +node : number | null
-        +color : string
-    }
-    class DemoTicket {
-        <<interface>>
-        +type : string
-        +label : string
-        +count : number
         +color : string
     }
     class TicketType {
@@ -193,44 +190,27 @@ classDiagram
         MR_X_TURN
         DETECTIVE_TURN
     }
-    class basePath {
-        <<module>>
-        +BASE_URL : string
-        +API_BASE : string
-        +WS_PATH : string
-    }
-    class revealRounds {
-        <<module>>
-        +REVEAL_ROUNDS : number[]
-        +nextRevealRound(currentRound: number) number | null
-    }
-    class transportModes {
-        <<module>>
-        +MODE_COLORS : Record~string, string~
-        +modeLegend : Array~object~
-        +modeColor(mode: string) string
-        +modeLabel(mode: string) string
-    }
 
-    gameStore --> GameStateDTO : gameState
-    gameStore --> ValidMoveDTO : validMoves
-    gameApi ..> JoinResponse : returns
-    gameApi ..> MapData : returns
-    gameApi ..> basePath : API_BASE
-    JoinResponse --> GameStateDTO
-    GameStateDTO "1" *-- "0..*" PlayerDTO : players
-    GameStateDTO "1" *-- "0..*" MrXLogEntry : mrXLog
-    GameStateDTO ..> GamePhase
-    GameStateDTO ..> TurnPhase
-    PlayerDTO ..> Role
-    PlayerDTO ..> TicketType
-    MapData "1" *-- "0..*" GraphNode : nodes
-    MapData "1" *-- "0..*" GraphEdge : edges
+    currentGame --> GameInfo : info
+    currentGame --> PossibleMove : possibleMoves
+    currentGame ..> api : removePlayer
+    api ..> JoinResult : returns
+    api ..> MapData : returns
+    JoinResult --> GameInfo
+    GameInfo "1" *-- "0..*" PlayerInfo : players
+    GameInfo "1" *-- "0..*" MrXLogEntry : mrXLog
+    GameInfo ..> GamePhase
+    GameInfo ..> TurnPhase
+    PlayerInfo ..> Role
+    PlayerInfo ..> TicketType
+    PlayerMarker ..> Role
+    MapData "1" *-- "0..*" MapNode : nodes
+    MapData "1" *-- "0..*" MapConnection : edges
 ```
 
-### Part 2: router, views and components
+### Part 2: router, pages and components
 
-Every view except `LandingView` reads `gameStore`, and `CreateGameView`, `JoinGameView`, `LobbyView` and `GameBoardView` call `gameApi` (see Part 1). `LobbyView` subscribes to the public topic `/topic/games/{id}`; `GameBoardView` subscribes to the player's two private topics. Both also re-sync over REST on every reconnect and poll every 6 s. Props flow down each arrow and events flow back up.
+Every page except `HomePage` uses `currentGame`, and every page except `HomePage` and `GameOverPage` calls `api` (see Part 1). `LobbyPage` listens on the public channel `/topic/games/{id}`; `GameBoardPage` listens on the player's two private channels. Both do it through `api.keepUpToDate`. `GameMap`, `SidePanel`, `TicketGrid` and `MrXLog` read game information straight from `currentGame`; props carry only the move being built in `GameBoardPage`. Props flow down each arrow and events flow back up.
 
 ```mermaid
 classDiagram
@@ -238,189 +218,141 @@ classDiagram
 
     class App {
         <<component>>
-        /isGameBoard : boolean
     }
     class router {
         <<router>>
     }
-    class LandingView {
-        <<view>>
+    class HomePage {
+        <<page>>
     }
-    class CreateGameView {
-        <<view>>
+    class CreateGamePage {
+        <<page>>
         -hostName : string
         -maxPlayers : number
         -loading : boolean
         -error : string
-        -handleCreate()
+        -create()
     }
-    class JoinGameView {
-        <<view>>
+    class JoinGamePage {
+        <<page>>
         -playerName : string
         -joinCode : string
         -loading : boolean
         -error : string
-        -handleJoin()
+        -join()
     }
-    class LobbyView {
-        <<view>>
+    class LobbyPage {
+        <<page>>
+        -gameId : string
         -starting : boolean
         -startError : string
-        -kicked : boolean
-        -aborted : boolean
-        -abortMessage : string
-        -stompClient : Client | null
-        -pollHandle : number | null
-        /gameId : string
-        /gameState : GameStateDTO | null
+        -ended : object | null
+        -stopUpdates()
+        /info : GameInfo | null
         /isHost : boolean
         /canStart : boolean
-        -applyState(state: GameStateDTO)
-        -handleStart()
-        -handleKick(targetPlayerId: string)
-        -handleLeave()
+        -onGameUpdate(state: GameInfo)
+        -refresh()
+        -start()
+        -kick(playerToRemove: string)
+        -leave()
     }
-    class GameBoardView {
-        <<view>>
-        -nodes : GraphNode[]
-        -edges : GraphEdge[]
+    class GameBoardPage {
+        <<page>>
+        -gameId : string
+        -nodes : MapNode[]
+        -edges : MapConnection[]
         -mapError : string | null
-        -gameMapRef : GameMap | null
-        -selectedNode : GraphNode | null
+        -mapPanel : GameMap | null
+        -selectedNode : MapNode | null
         -selectedTicket : string | null
-        -submitting : boolean
+        -usingDoubleTicket : boolean
+        -sendingMove : boolean
         -moveError : string | null
-        -doubleMode : boolean
-        -popupQueue : PopupEvent[]
-        -stompClient : Client | null
-        -pollHandle : number | null
-        /gameState : GameStateDTO | null
-        /myNodeId : number
-        /reachableNodeIds : Set~number~
-        /isSelectedReachable : boolean
-        /displayPlayers : DemoPlayer[]
-        /myTickets : DemoTicket[]
-        /hasDoubleTicket : boolean
-        /mrXDoubleMovePending : boolean
+        -popups : object[]
+        -stopUpdates()
+        /info : GameInfo | null
+        /players : PlayerMarker[]
         /turnLabel : string
         /nextReveal : number | null
-        -applyState(state: GameStateDTO)
-        -syncFromServer()
-        -connectWs()
-        -handleSelectNode(node: GraphNode | null)
+        -onGameUpdate(state: GameInfo)
+        -refresh()
+        -selectNode(node: MapNode | null)
         -confirmMove()
-        -dismissPopup()
-        -handleLeave()
+        -leave()
     }
-    class GameEndView {
-        <<view>>
-        /gameState : GameStateDTO | null
-        /winner : string | null
-        /bannerText : string
-        /resultText : string
-        /narrative : string
+    class GameOverPage {
+        <<page>>
+        /info : GameInfo | null
+        /round : number
+        /result : object
     }
     class GameMap {
         <<component>>
-        +nodes : GraphNode[]
-        +edges : GraphEdge[]
-        +displayPlayers : DemoPlayer[]
-        +selectedNode : GraphNode | null
-        +reachableIds? : Set~number~
-        +validMoves? : ValidMoveDTO[]
-        -searchQuery : string
-        -exploreNode : GraphNode | null
-        -popupNode : GraphNode | null
-        -currentStyleId : string
-        +focusNodeId(nodeId: number)
+        +nodes : MapNode[]
+        +edges : MapConnection[]
+        +players : PlayerMarker[]
+        +selectedNode : MapNode | null
+        -searchText : string
+        -exploredNode : MapNode | null
+        -popupNode : MapNode | null
+        -currentStyle : string
+        /reachableNodeIds : Set~number~
+        /myNode : MapNode | null
+        +showNode(nodeId: number)
+        -moveCameraTo(node: MapNode | null)
         -switchStyle(id: string)
-        -selectPopupMode(mode: string)
-        +«emit» select-node(node: GraphNode | null)
-        +«emit» select-ticket(mode: string)
+        -pickPopupTicket(ticket: string)
+        +«emit» select-node(node: MapNode | null)
+        +«emit» select-ticket(ticket: string)
     }
-    class InfoPanel {
+    class SidePanel {
         <<component>>
-        +players : DemoPlayer[]
-        +tickets : DemoTicket[]
-        +mrXLog : MrXLogEntry[]
-        +selectedNode : GraphNode | null
+        +players : PlayerMarker[]
+        +nodes : MapNode[]
+        +selectedNode : MapNode | null
         +selectedTicket : string | null
-        +reachable : boolean
-        +isMyTurn : boolean
-        +submitting : boolean
+        +sendingMove : boolean
         +moveError : string | null
-        +validMoves : ValidMoveDTO[]
-        +nodes : GraphNode[]
-        +doubleMode : boolean
-        +hasDoubleTicket : boolean
-        +mrXDoubleMovePending : boolean
-        /nodeById : Map~number, GraphNode~
-        -selectMove(nodeId: number, mode: string)
-        +«emit» select-ticket(mode: string)
+        +usingDoubleTicket : boolean
+        /nodeLookup : Map~number, MapNode~
+        /canReachSelected : boolean
+        /selectedNodeName : string
+        -pickMove(nodeId: number, ticket: string)
+        +«emit» select-node(node: MapNode | null)
+        +«emit» select-ticket(ticket: string)
         +«emit» confirm-move()
-        +«emit» select-node(node: GraphNode | null)
-        +«emit» focus-node(nodeId: number)
-        +«emit» declare-double()
-        +«emit» cancel-double()
+        +«emit» show-on-map(nodeId: number)
+        +«emit» use-double-ticket()
+        +«emit» cancel-double-ticket()
         +«emit» leave()
-    }
-    class MoveSelector {
-        <<component>>
-        +selectedNode : GraphNode | null
-        +selectedTicket : string | null
-        +reachable : boolean
-        +submitting : boolean
-        +moveError : string | null
-        /nodeDisplayName : string
-        +«emit» confirm()
-    }
-    class MrXLog {
-        <<component>>
-        +log : MrXLogEntry[]
     }
     class TicketGrid {
         <<component>>
-        +tickets : DemoTicket[]
-        +isMyTurn : boolean
-        +hasDoubleTicket : boolean
-        +doubleMode : boolean
-        +mrXDoubleMovePending : boolean
-        +«emit» declare-double()
-        +«emit» cancel-double()
+        +usingDoubleTicket : boolean
+        /tickets : object[]
+        /hasDoubleTicket : boolean
+        +«emit» use-double-ticket()
+        +«emit» cancel-double-ticket()
+    }
+    class MrXLog {
+        <<component>>
+        /log : MrXLogEntry[]
     }
     class JoinCodeCard {
         <<component>>
         +code : string
-        -copied : boolean
-        -linkCopied : boolean
-        -qrDataUrl : string
+        -qrImage : string
+        -copied : code | link | null
         /joinLink : string
-        -copyCode()
-        -copyLink()
+        -copy(text: string, which: string)
     }
-    class PlayerSlotList {
+    class PlayerList {
         <<component>>
-        +players : PlayerDTO[]
+        +players : PlayerInfo[]
         +maxPlayers : number
-        +hostPlayerId? : string
-        /emptySlots : number
-        +«emit» kick(playerId: string)
-    }
-    class ErrorBanner {
-        <<component>>
-        +message : string
-    }
-    class FormInput {
-        <<component>>
-        +label : string
-        +modelValue : string
-        +placeholder? : string
-        +type? : string
-        +maxlength? : number
-        +inputClass? : string
-        +uppercase? : boolean
-        -handleInput(e: Event)
-        +«emit» update:modelValue(value: string)
+        +canKick : boolean
+        +«emit» kick(playerToRemove: string)
     }
     class PageHeader {
         <<component>>
@@ -429,29 +361,25 @@ classDiagram
     }
     class ThemeToggle {
         <<component>>
+        -isDark : boolean
+        -toggle()
     }
 
     App --> ThemeToggle : renders, not on /game/*
     App ..> router : RouterView
-    router --> LandingView : /
-    router --> CreateGameView : /create
-    router --> JoinGameView : /join and /#58;code
-    router --> LobbyView : /lobby/#58;id
-    router --> GameBoardView : /game/#58;id
-    router --> GameEndView : /game/#58;id/end
-    CreateGameView --> PageHeader
-    CreateGameView --> FormInput
-    CreateGameView --> ErrorBanner
-    JoinGameView --> PageHeader
-    JoinGameView --> FormInput
-    JoinGameView --> ErrorBanner
-    LobbyView --> PageHeader
-    LobbyView --> ErrorBanner
-    LobbyView --> JoinCodeCard
-    LobbyView --> PlayerSlotList
-    GameBoardView --> GameMap : calls focusNodeId via ref
-    GameBoardView --> InfoPanel
-    InfoPanel --> TicketGrid
-    InfoPanel --> MrXLog
-    InfoPanel --> MoveSelector
+    router --> HomePage : /
+    router --> CreateGamePage : /create
+    router --> JoinGamePage : /join and /#58;code
+    router --> LobbyPage : /lobby/#58;id
+    router --> GameBoardPage : /game/#58;id
+    router --> GameOverPage : /game/#58;id/end
+    CreateGamePage --> PageHeader
+    JoinGamePage --> PageHeader
+    LobbyPage --> PageHeader
+    LobbyPage --> JoinCodeCard
+    LobbyPage --> PlayerList
+    GameBoardPage --> GameMap : calls showNode via ref
+    GameBoardPage --> SidePanel
+    SidePanel --> TicketGrid
+    SidePanel --> MrXLog
 ```

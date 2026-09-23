@@ -8,9 +8,9 @@ ENGR489 capstone project: **Hunting Mr. X: Wellington Edition** — a web-based 
 
 **Naming note**: the game mechanics are based on the board game *Scotland Yard* by Ravensburger. Ravensburger granted permission to use the mechanics for this non-commercial academic project, but the "Scotland Yard" name/brand must not be used in the project (code, docs, UI, or public references) — hence "Hunting Mr. X: Wellington Edition". Do not reintroduce "Scotland Yard" as a name anywhere in this repo; it may still appear in historical/submitted documents under `documentation/project_proposal/`, which are left as-is since they're the record of what was originally submitted.
 
-**Ticket naming note**: the `BLACK` ticket (`TicketType.BLACK` in code, `TicketType` enum in `openapi.yaml`) is shown to players as the **Invisible ticket**. The wire/enum value stays `BLACK` — only the player-facing name changed (see `frontend/src/utils/transportModes.ts` for the existing label mapping). Docs should say "Invisible ticket" in prose and reserve `BLACK` for literal enum/wire-value references.
+**Ticket naming note**: the `BLACK` ticket (`TicketType.BLACK` in code, `TicketType` enum in `openapi.yaml`) is shown to players as the **Invisible ticket**. The wire/enum value stays `BLACK` — only the player-facing name changed (see `frontend/src/shared/tickets.ts` for the existing label mapping). Docs should say "Invisible ticket" in prose and reserve `BLACK` for literal enum/wire-value references.
 
-Implementation is well underway. The backend is a Spring Boot app (`backend/`): a plain-Java rules core (`game/`) behind a thin `GameService`, REST controllers, a STOMP broker, and a full test suite (see Evaluation Methods). The frontend is a Vue 3 + Vite + Pinia + Tailwind app (`frontend/`) with lobby and game views, a Pinia store, and a MapLibre GL map wired to the backend's map data over STOMP/WebSocket. `documentation/openapi.yaml` tracks the live REST + WebSocket surface as it evolves (see the sync rule below).
+Implementation is well underway. The backend is a Spring Boot app (`backend/`): a plain-Java rules core (`game/`) behind a thin `GameService`, REST controllers, a STOMP broker, and a full test suite (see Evaluation Methods). The frontend is a Vue 3 + Vite + Tailwind app (`frontend/`) with lobby and game views, a plain reactive store (`src/shared/current-game.ts`), and a MapLibre GL map wired to the backend's map data, kept live over STOMP/SockJS (`src/shared/api.ts`). `documentation/openapi.yaml` tracks the live REST + WebSocket surface as it evolves (see the sync rule below).
 
 ## Running the Map API Benchmark
 
@@ -33,7 +33,7 @@ GOOGLE_MAPS_API_KEY=your_key_here
 **Client–server, real-time WebSocket communication.**
 
 - **Backend**: Spring Boot game engine enforcing the game rules — player roles, turn management, movement validation, ticket tracking, win conditions, session management (`Game`, `GameService`, `MapGraph`, `GameController`, `WebSocketConfig`).
-- **Frontend**: Vue 3 map UI (MapLibre GL) allowing players to view available moves, select transport, and track game state, backed by a Pinia store and STOMP over WebSocket.
+- **Frontend**: Vue 3 map UI (MapLibre GL) allowing players to view available moves, select transport, and track game state, backed by a plain Vue `reactive()` store and STOMP over SockJS.
 - **Map layer**: static graph JSON (`map.json`/`test-map.json`), not routing-API-based. API routing was ruled out early — too costly and too slow for the number of edges required. The map file is loaded into `MapGraph` once at startup and served to the frontend at `GET /api/map`.
 
 ## Game State Machine
@@ -69,7 +69,7 @@ Update whenever you:
 ### WebSocket changes (backend broadcasts or frontend subscriptions)
 Update whenever you:
 - Add a new STOMP topic the server publishes to (backend `messaging.convertAndSend(...)`)
-- Add a new STOMP subscription in any frontend view or composable (`.subscribe(...)`)
+- Add a new STOMP subscription in any frontend page (a channel passed to `keepUpToDate(...)` from `frontend/src/shared/api.ts`)
 - Change the payload schema of an existing topic
 - Add new client-side reactions to an existing topic (e.g. a new `phase` value triggers a new navigation)
 - Remove a topic or subscription

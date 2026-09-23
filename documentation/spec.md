@@ -4,7 +4,7 @@
 
 | Layer | Technology |
 |---|---|
-| Frontend framework | Vue.js 3 + Pinia (state management) + Vue Router, TypeScript, Tailwind CSS 4 |
+| Frontend framework | Vue.js 3 + Vue Router, TypeScript, Tailwind CSS 4 (shared state is a plain Vue `reactive()` object in `frontend/src/shared/current-game.ts`) |
 | Map library | MapLibre GL v4 |
 | Map tiles | CARTO basemap vector styles without labels: Dark Matter by default, Positron and Voyager selectable on the board (free, no API key) |
 | Backend framework | Java 21 + Spring Boot 4 |
@@ -151,7 +151,7 @@ On game start the server randomly assigns each player a distinct node. Mr X's st
 ## 4. System Architecture
 
 ```
-Browser (Vue.js + Pinia + MapLibre GL)
+Browser (Vue.js + MapLibre GL)
   │
   ├── REST HTTP/JSON ──────────────────────┐
   │   (lobby, move submission)             │
@@ -258,13 +258,13 @@ There are two themes, dark (the default) and light. The sun/moon button switches
 | Page background | `bg-gray-950` |
 | Card / panel | `bg-gray-900` / `bg-gray-800` |
 | Primary action | `bg-blue-600` |
-| Secondary action | `bg-gray-700` |
+| Secondary action | `bg-gray-800` |
 | Success / start | `bg-green-600` |
 | Destructive | `bg-red-600` |
 | Body text | `text-white` |
 | Muted text | `text-gray-400` |
 
-**Transport mode colours** (map lines and ticket UI), from `frontend/src/utils/transportModes.ts`:
+**Transport mode colours** (map lines and ticket UI), from `frontend/src/shared/tickets.ts`:
 
 | Mode | Hex |
 |---|---|
@@ -302,7 +302,7 @@ Structure (top to bottom, centred):
    - Tagline: "Hunt down Mr. X across Wellington's streets", `text-sm` muted
 2. **Button group** (stacked)
    - **Create Game**: `bg-blue-600`, `Users` icon, routes to `/create`
-   - **Join Game**: `bg-gray-700`, `UserPlus` icon, routes to `/join`
+   - **Join Game**: `bg-gray-800`, `UserPlus` icon, routes to `/join`
 3. **Attribution line**: game mechanics based on the Ravensburger board game; non-commercial student project, not affiliated with Ravensburger.
 
 No header or nav bar.
@@ -315,7 +315,7 @@ No header or nav bar.
 - Form card:
   - "Your Name" input (max 20 characters)
   - "Max Players" `<select>`, "2 players" to "6 players", default 4
-  - Error banner for server errors, e.g. a blank name
+  - Error banner, e.g. for a blank name (checked in the browser) or a server error
   - **Create Game** button: calls `POST /api/games/create`, keeps the returned player id, token and state, and goes to the lobby
 
 ---
@@ -348,14 +348,14 @@ No header or nav bar.
 
 **Map panel (MapLibre GL):**
 - CARTO basemap without labels; a Dark / Light / Voyager switch picks the style, and zooming out stops at the Wellington region.
-- Edges are drawn from their `coordinates`, one colour per mode (§8.1). Nodes are circles; players are markers.
-- On your turn your reachable nodes are highlighted. Clicking one opens a popup with a button per transport mode you can pay with.
+- Edges are drawn from their `coordinates`, one colour per mode (§8.1). Each node is a pie chart of the modes that stop there. A node with a player on it is a white ring filled with the player's colour, with a role glyph (an X for Mr X, a magnifying glass for detectives) and the player's name above.
+- Clicking any node, on any turn, highlights it and its direct neighbours and dims the rest. On your turn, clicking a node you can reach also opens a popup with a button per transport mode you can pay with. Once a destination is picked, only your node and that destination stay lit.
 - A node search box, a button that centres the map on your node, and a mode legend.
 
 **Side panel:**
 - Players: name, colour and node, with `?` for Mr X when you can't see him. Clicking a node number centres the map on it.
 - Your tickets, with ∞ for Mr X's unlimited ones. Mr X also gets **Use Double Ticket** while he has one left.
-- Mr X log: the ticket used each round, a DOUBLE tag on the first leg of a double (the second leg is labelled like "2b"), and a reveal row with his node on reveal rounds.
+- Mr X log: the ticket used each round, a DOUBLE tag on the first leg of a double (the second leg is labelled like "Round 1b"), and a reveal row with his node on reveal rounds.
 - Reachable nodes: each node you can reach with a chip for every ticket that pays for it, the Invisible ticket included for Mr X.
 - Move: the chosen node and ticket, and **Confirm Move** (`POST /api/games/{id}/moves`). When it isn't your turn this reads "Waiting for other players...".
 - **Leave Game**, which ends the game for everyone.
