@@ -50,7 +50,7 @@ info:
 
     When the server runs with `BASE_PATH` set (e.g. `/mrx`), every REST path
     and the `/ws` endpoint sit under that prefix (`/mrx/api/...`, `/mrx/ws`).
-  version: 0.1.13
+  version: 0.1.14
 servers:
   - url: http://localhost:8999
     description: Local development server
@@ -409,14 +409,6 @@ paths:
       responses:
         '204':
           description: Player removed (no body)
-        '400':
-          description: Host attempted to kick themselves
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Host cannot kick themselves
         '403':
           description: Missing or unknown token, or a non-host tried to kick
           content:
@@ -843,8 +835,9 @@ components:
         modes:
           type: array
           items:
-            $ref: '#/components/schemas/TicketType'
-          description: Transport modes available on this edge
+            type: string
+            enum: [ESCOOTER, BUS, TRAIN, FERRY]
+          description: Transport modes available on this edge; any other value stops the server at startup
         coordinates:
           type: array
           description: Road-following polyline as [lng, lat] pairs; omitted for straight-line edges

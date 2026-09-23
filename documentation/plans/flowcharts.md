@@ -65,11 +65,10 @@ flowchart TD
 
 ``` mermaid
 flowchart TD
-    A([Detective turn starts]) --> B[Fetch all positions]
-    B --> C[Fetch valid moves for current detective]
-    C --> D{Has valid moves?}
-    D -- no --> E[Detective skips]
-    D -- yes --> F[Highlight reachable nodes on map]
+    A([Detective turn starts]) --> D{Next detective has\na legal move? server-side}
+    D -- no --> E[Server skips them,\nno turn, no ticket spent]
+    D -- yes --> C[Fetch valid moves for that detective]
+    C --> F[Highlight reachable nodes on map]
     F --> G[Detective selects node]
     G --> H{Valid ticket\nfor selected node?}
     H -- no valid ticket --> G
@@ -79,7 +78,7 @@ flowchart TD
     K -- caught --> L([Detectives win!])
     K -- no catch --> M{All detectives moved?}
     E --> M
-    M -- no --> C
+    M -- no --> D
     M -- yes --> O{Was that round 24?}
     O -- yes --> P([Mr. X wins!])
     O -- no --> N[Increment round]

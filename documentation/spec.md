@@ -133,7 +133,7 @@ The board is one JSON file in `backend/src/main/resources/static/`, named by `ga
 
 - `id` is a unique integer; `label` is its display name.
 - `from`/`to` reference node `id` integers.
-- `modes` is a non-empty array of `ESCOOTER`, `BUS`, `TRAIN` or `FERRY` (uppercase, the `TicketType` names).
+- `modes` is an array of `ESCOOTER`, `BUS`, `TRAIN` or `FERRY` (uppercase, the `TicketType` names). An edge with an empty `modes` array joins nothing.
 - `coordinates` is an array of `[lng, lat]` pairs (GeoJSON coordinate order) drawn as the edge, pre-computed from OSM road data, not generated at runtime.
 - Edges are **undirected**: movement is valid in both directions. If two edges join the same pair of nodes, their modes are merged.
 - `offRoad` is written by the map creator and ignored by the game.
@@ -280,7 +280,7 @@ Tailwind's default system font stacks: `font-sans` for text, `font-mono` for joi
 
 ### 8.3 Icons
 
-Lucide (`lucide-vue-next`), the Vue port of the Lucide icons used in the Figma reference. Icons in use: `Users` and `UserPlus` (landing page), `ArrowLeft` (page headers), `ClipboardCopy` and `Check` (copy buttons), `Sun` and `Moon` (theme toggle), `Trophy` (end screen), `Scooter`, `Bus`, `TrainFront`, `Ship` and `EyeOff` (transport modes and the Invisible ticket), and `LocateFixed` (centre the map on your node).
+Lucide (`lucide-vue-next`), the Vue port of the Lucide icons used in the Figma reference. Icons in use: `Users` and `UserPlus` (landing page), `ArrowLeft` (page headers), `ClipboardCopy` and `Check` (copy buttons; `Check` also marks the chosen ticket in the reachable-nodes list), `Sun` and `Moon` (theme toggle), `Trophy` (end screen), `Scooter`, `Bus`, `TrainFront`, `Ship` and `EyeOff` (transport modes and the Invisible ticket), and `LocateFixed` (centre the map on your node).
 
 ### 8.4 Border Radius
 
