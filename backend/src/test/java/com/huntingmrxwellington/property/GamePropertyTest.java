@@ -1,14 +1,14 @@
 package com.huntingmrxwellington.property;
 
-import com.huntingmrxwellington.exception.ConflictException;
-import com.huntingmrxwellington.exception.ForbiddenException;
 import com.huntingmrxwellington.game.Game;
-import com.huntingmrxwellington.game.GamePhase;
 import com.huntingmrxwellington.game.MapGraph;
-import com.huntingmrxwellington.game.MrXMove;
 import com.huntingmrxwellington.game.Player;
-import com.huntingmrxwellington.game.TicketType;
-import com.huntingmrxwellington.game.ValidMove;
+import com.huntingmrxwellington.game.enums.GamePhase;
+import com.huntingmrxwellington.game.enums.TicketType;
+import com.huntingmrxwellington.game.exception.ConflictException;
+import com.huntingmrxwellington.game.exception.ForbiddenException;
+import com.huntingmrxwellington.game.view.MrXMove;
+import com.huntingmrxwellington.game.view.ValidMove;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
@@ -21,11 +21,11 @@ import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.huntingmrxwellington.game.TicketType.BUS;
-import static com.huntingmrxwellington.game.TicketType.DOUBLE;
-import static com.huntingmrxwellington.game.TicketType.ESCOOTER;
-import static com.huntingmrxwellington.game.TicketType.FERRY;
-import static com.huntingmrxwellington.game.TicketType.TRAIN;
+import static com.huntingmrxwellington.game.enums.TicketType.BUS;
+import static com.huntingmrxwellington.game.enums.TicketType.DOUBLE;
+import static com.huntingmrxwellington.game.enums.TicketType.ESCOOTER;
+import static com.huntingmrxwellington.game.enums.TicketType.FERRY;
+import static com.huntingmrxwellington.game.enums.TicketType.TRAIN;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 

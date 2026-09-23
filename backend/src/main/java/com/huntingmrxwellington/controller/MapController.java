@@ -17,6 +17,7 @@ public class MapController {
         this.map = map;
     }
 
+    /** @return the raw map JSON: nodes with coordinates, and edges with their transport modes */
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
     public byte[] getMap() {
         return map.json();

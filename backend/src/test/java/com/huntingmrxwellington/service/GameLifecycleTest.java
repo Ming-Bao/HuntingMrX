@@ -1,11 +1,11 @@
 package com.huntingmrxwellington.service;
 
-import com.huntingmrxwellington.exception.GameNotFoundException;
-import com.huntingmrxwellington.game.GamePhase;
-import com.huntingmrxwellington.game.GameState;
-import com.huntingmrxwellington.game.PlayerView;
 import com.huntingmrxwellington.game.TestMaps;
-import com.huntingmrxwellington.game.Winner;
+import com.huntingmrxwellington.game.enums.GamePhase;
+import com.huntingmrxwellington.game.enums.Winner;
+import com.huntingmrxwellington.game.exception.NotFoundException;
+import com.huntingmrxwellington.game.view.GameState;
+import com.huntingmrxwellington.game.view.PlayerView;
 import com.huntingmrxwellington.service.GameService.JoinResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -119,7 +119,7 @@ class GameLifecycleTest {
         JoinResponse host = service.createGame("Host", 4);
         String id = host.gameState().gameId();
         service.removePlayer(id, host.playerToken(), host.playerId());
-        assertThatThrownBy(() -> service.getGame(id, null)).isInstanceOf(GameNotFoundException.class);
+        assertThatThrownBy(() -> service.getGame(id, null)).isInstanceOf(NotFoundException.class);
     }
 
     @Test

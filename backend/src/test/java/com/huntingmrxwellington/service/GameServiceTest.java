@@ -1,15 +1,15 @@
 package com.huntingmrxwellington.service;
 
-import com.huntingmrxwellington.exception.ConflictException;
-import com.huntingmrxwellington.exception.ForbiddenException;
-import com.huntingmrxwellington.exception.GameNotFoundException;
-import com.huntingmrxwellington.game.GamePhase;
-import com.huntingmrxwellington.game.GameState;
-import com.huntingmrxwellington.game.PlayerView;
-import com.huntingmrxwellington.game.Role;
 import com.huntingmrxwellington.game.TestMaps;
-import com.huntingmrxwellington.game.TicketType;
-import com.huntingmrxwellington.game.ValidMove;
+import com.huntingmrxwellington.game.enums.GamePhase;
+import com.huntingmrxwellington.game.enums.Role;
+import com.huntingmrxwellington.game.enums.TicketType;
+import com.huntingmrxwellington.game.exception.ConflictException;
+import com.huntingmrxwellington.game.exception.ForbiddenException;
+import com.huntingmrxwellington.game.exception.NotFoundException;
+import com.huntingmrxwellington.game.view.GameState;
+import com.huntingmrxwellington.game.view.PlayerView;
+import com.huntingmrxwellington.game.view.ValidMove;
 import com.huntingmrxwellington.service.GameService.JoinResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -122,15 +122,15 @@ class GameServiceTest {
 
     @Test
     void joinErrorsAreReported() {
-        assertThatThrownBy(() -> service.joinGame("ZZZZZZ", "Guest")).isInstanceOf(GameNotFoundException.class);
+        assertThatThrownBy(() -> service.joinGame("ZZZZZZ", "Guest")).isInstanceOf(NotFoundException.class);
         assertThatThrownBy(() -> service.joinGame(" ", "Guest")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.joinGame(null, "Guest")).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void anUnknownGameIsNotFound() {
-        assertThatThrownBy(() -> service.getGame("nope", null)).isInstanceOf(GameNotFoundException.class);
-        assertThatThrownBy(() -> service.startGame("nope", "t")).isInstanceOf(GameNotFoundException.class);
+        assertThatThrownBy(() -> service.getGame("nope", null)).isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> service.startGame("nope", "t")).isInstanceOf(NotFoundException.class);
     }
 
     @Test

@@ -1,5 +1,8 @@
 package com.huntingmrxwellington.game;
 
+import com.huntingmrxwellington.game.enums.TicketType;
+import com.huntingmrxwellington.game.view.ValidMove;
+
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -18,6 +21,7 @@ import java.util.Set;
  *  silently dropping the edge. */
 public final class MapGraph {
 
+    /** The tickets an edge can carry. BLACK and DOUBLE aren't transport modes. */
     private static final Set<TicketType> EDGE_MODES =
             EnumSet.of(TicketType.ESCOOTER, TicketType.BUS, TicketType.TRAIN, TicketType.FERRY);
 
@@ -31,6 +35,13 @@ public final class MapGraph {
         this.neighbours = neighbours;
     }
 
+    /**
+     * Reads the board from map JSON: {"nodes": [{"id": ...}], "edges": [{"from", "to", "modes"}]}.
+     *
+     * @param json the raw map file
+     * @return the parsed board
+     * @throws IllegalStateException if an edge names an unknown node or mode
+     */
     public static MapGraph parse(byte[] json) {
         JsonNode root = new ObjectMapper().readTree(new String(json, StandardCharsets.UTF_8));
         List<Integer> ids = new ArrayList<>();
@@ -54,28 +65,49 @@ public final class MapGraph {
         return new MapGraph(json, List.copyOf(ids), neighbours);
     }
 
+    /**
+     * The ticket for an edge's mode name.
+     *
+     * @param name the mode name from the map file
+     * @param from one end of the edge, for the error message
+     * @param to the other end of the edge, for the error message
+     * @return the matching transport ticket
+     * @throws IllegalStateException if the name isn't a transport mode
+     */
     private static TicketType edgeMode(String name, int from, int to) {
         for (TicketType t : EDGE_MODES) if (t.name().equals(name)) return t;
         throw new IllegalStateException("Edge " + from + "-" + to + " has unknown mode " + name);
     }
 
-    /** The raw map JSON, served as-is to the frontend. Callers must not modify it. */
+    /** @return the raw map JSON, served as-is to the frontend; callers must not modify it */
     public byte[] json() {
         return json;
     }
 
+    /** @return every node id on the board, in file order */
     public List<Integer> nodeIds() {
         return nodeIds;
     }
 
-    /** Modes on the edge between a and b; empty if they aren't adjacent. */
+    /**
+     * The transport modes on the edge between two nodes.
+     *
+     * @param a one node
+     * @param b the other node
+     * @return the modes, or an empty set if the nodes aren't adjacent
+     */
     public Set<TicketType> modesBetween(int a, int b) {
         return Collections.unmodifiableSet(neighbours.getOrDefault(a, Map.of()).getOrDefault(b, Set.of()));
     }
 
-    /** Every node the player can reach in one leg, sorted by node id, with the tickets that
-     *  would pay for it: matching transport tickets they hold, plus Invisible (BLACK) on any
-     *  edge if they hold one. Blocked nodes are left out. */
+    /**
+     * Every node the player can reach in one leg, with the tickets that would pay for it:
+     * matching transport tickets they hold, plus Invisible (BLACK) on any edge if they hold one.
+     *
+     * @param player the player moving
+     * @param blocked nodes the player may not move to
+     * @return one entry per reachable node, sorted by node id
+     */
     public List<ValidMove> validMoves(Player player, Set<Integer> blocked) {
         List<ValidMove> moves = new ArrayList<>();
         neighbours.getOrDefault(player.node(), Map.of()).forEach((to, modes) -> {

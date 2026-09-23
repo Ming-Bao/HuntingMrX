@@ -1,4 +1,4 @@
-package com.huntingmrxwellington.game;
+package com.huntingmrxwellington.game.enums;
 
 /** BLACK is shown to players as the Invisible ticket; the wire value stays BLACK.
  *  DOUBLE is only ever sent as a prefix on a move ("DOUBLE_BUS"), never as a leg. */

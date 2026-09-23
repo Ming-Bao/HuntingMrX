@@ -1,5 +1,9 @@
 package com.huntingmrxwellington.game;
 
+import com.huntingmrxwellington.game.enums.Role;
+import com.huntingmrxwellington.game.enums.TicketType;
+import com.huntingmrxwellington.game.view.ValidMove;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
@@ -8,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static com.huntingmrxwellington.game.TicketType.*;
+import static com.huntingmrxwellington.game.enums.TicketType.*;
 import static org.assertj.core.api.Assertions.*;
 
 class MapGraphTest {

@@ -29,7 +29,7 @@ Game --> MapGraph : board
 @startuml
 skinparam classAttributeIconSize 0
 
-' ── Enumerations ──────────────────────────────────────────────────────
+' ── Enumerations (package game.enums) ───────────────────────────────
 
 enum GamePhase {
     LOBBY
@@ -101,7 +101,7 @@ class Game {
     + start(requester : Player, rng : Random) : void
     + validMoves(player : Player) : List<ValidMove>
     + move(player : Player, to : int, ticket : String) : void
-    + leave(player : Player) : boolean
+    + leave(player : Player) : void
     + kick(requester : Player, targetId : String) : void
     + abortIfIdle(limit : Duration) : boolean
     + viewFor(viewer : Player) : GameState
@@ -116,7 +116,7 @@ Game ..> Winner
 Player ..> Role
 Player ..> TicketType
 
-' ── Views sent to clients (records in package game) ───────────────────
+' ── Views sent to clients (records in package game.view) ────────────
 
 class GameState <<record>> {
     gameId, joinCode, phase, maxPlayers, players,
@@ -190,24 +190,24 @@ GameService ..> JoinResponse : creates
 GameController --> GameService : delegates
 MapController --> MapGraph : serves JSON
 
-' ── Errors ────────────────────────────────────────────────────────────
+' ── Errors (package game.exception) ─────────────────────────────────
 
-class GameNotFoundException <<RuntimeException>>
+class NotFoundException <<RuntimeException>>
 class ForbiddenException <<RuntimeException>>
 class ConflictException <<RuntimeException>>
 
 class ApiExceptionHandler <<ControllerAdvice>> {
-    GameNotFoundException → 404
+    NotFoundException → 404
     ForbiddenException → 403
     ConflictException → 409
     IllegalArgumentException, unreadable body → 400
     error body: JSON with one "error" field
 }
 
-Game ..> GameNotFoundException : throws
+Game ..> NotFoundException : throws
 Game ..> ForbiddenException : throws
 Game ..> ConflictException : throws
-GameService ..> GameNotFoundException : throws
+GameService ..> NotFoundException : throws
 GameService ..> ForbiddenException : throws
 @enduml
 ```

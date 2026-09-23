@@ -1,8 +1,18 @@
 package com.huntingmrxwellington.game;
 
-import com.huntingmrxwellington.exception.ConflictException;
-import com.huntingmrxwellington.exception.ForbiddenException;
-import com.huntingmrxwellington.exception.GameNotFoundException;
+import com.huntingmrxwellington.game.enums.GamePhase;
+import com.huntingmrxwellington.game.enums.Role;
+import com.huntingmrxwellington.game.enums.TicketType;
+import com.huntingmrxwellington.game.enums.TurnPhase;
+import com.huntingmrxwellington.game.enums.Winner;
+import com.huntingmrxwellington.game.exception.ConflictException;
+import com.huntingmrxwellington.game.exception.ForbiddenException;
+import com.huntingmrxwellington.game.exception.NotFoundException;
+import com.huntingmrxwellington.game.view.GameState;
+import com.huntingmrxwellington.game.view.MrXMove;
+import com.huntingmrxwellington.game.view.PlayerView;
+import com.huntingmrxwellington.game.view.ValidMove;
+
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -18,7 +28,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-import static com.huntingmrxwellington.game.TicketType.*;
+import static com.huntingmrxwellington.game.enums.TicketType.*;
 // Explicit AssertJ imports: Assertions.* also brings in a DOUBLE constant that clashes with TicketType.DOUBLE.
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -571,7 +581,7 @@ class GameTest {
             Game g = newGame(4);
             Player host = g.join("Host");
             Player guest = g.join("Guest");
-            assertThat(g.leave(guest)).isFalse();
+            g.leave(guest);
             assertThat(g.players()).containsExactly(host);
             assertThat(g.phase()).isEqualTo(GamePhase.LOBBY);
         }
@@ -581,16 +591,18 @@ class GameTest {
             Game g = newGame(4);
             Player host = g.join("Host");
             g.join("Guest");
-            assertThat(g.leave(host)).isFalse();
+            g.leave(host);
+            assertThat(g.players()).isNotEmpty();
             assertThat(g.phase()).isEqualTo(GamePhase.ENDED);
             assertThat(g.abortReason()).isEqualTo("The host left the game");
         }
 
         @Test
-        void theLastPlayerLeavingReportsTheGameIsEmpty() {
+        void theLastPlayerLeavingEmptiesTheGame() {
             Game g = newGame(4);
             Player host = g.join("Host");
-            assertThat(g.leave(host)).isTrue();
+            g.leave(host);
+            assertThat(g.players()).isEmpty();
         }
 
         @Test
@@ -626,7 +638,8 @@ class GameTest {
         void leavingAnEndedGameJustRemovesThePlayer() {
             start(1, 3);
             game.leave(mrX);
-            assertThat(game.leave(alice)).isTrue();
+            game.leave(alice);
+            assertThat(game.players()).isEmpty();
             assertThat(game.abortReason()).isEqualTo("Mr. X has left the game");
         }
     }
@@ -663,7 +676,7 @@ class GameTest {
         void kickingAnUnknownPlayerIsNotFound() {
             Game g = newGame(4);
             Player host = g.join("Host");
-            assertThatThrownBy(() -> g.kick(host, "nobody")).isInstanceOf(GameNotFoundException.class);
+            assertThatThrownBy(() -> g.kick(host, "nobody")).isInstanceOf(NotFoundException.class);
         }
 
         @Test

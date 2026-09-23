@@ -15,22 +15,18 @@ flowchart TB
         controller["<b>controller</b><br/>GameController<br/>MapController<br/>ApiExceptionHandler"]
         service["<b>service</b><br/>GameService"]
         config["<b>config</b><br/>GameSettings<br/>WebSocketConfig"]
-        game["<b>game</b><br/><i>plain Java, no Spring</i><br/>Game · Player · MapGraph<br/>GameState · PlayerView<br/>MrXMove · ValidMove<br/>GamePhase · TurnPhase<br/>Role · Winner · TicketType"]
-        exception["<b>exception</b><br/>GameNotFoundException<br/>ForbiddenException<br/>ConflictException"]
+        game["<b>game</b><br/><i>plain Java, no Spring</i><br/>Game · Player · MapGraph<br/><br/><b>game.view</b><br/>GameState · PlayerView<br/>MrXMove · ValidMove<br/><br/><b>game.enums</b><br/>GamePhase · TurnPhase<br/>Role · Winner · TicketType<br/><br/><b>game.exception</b><br/>NotFoundException<br/>ForbiddenException<br/>ConflictException"]
     end
 
     client -. "REST /api" .-> controller
     service -. "STOMP push over /ws" .-> client
     controller --> service
     controller --> game
-    controller --> exception
     service --> config
     service --> game
-    service --> exception
     app --> config
     app --> game
     config --> game
-    game --> exception
 ```
 
 ## Detailed Class Diagram
@@ -39,7 +35,7 @@ Every field and public method, plus the package-private ones (marked `~`); stati
 
 The same two parts are pages in [`class-graph.drawio`](class-graph.drawio), which is easier to zoom through: open it in draw.io (app.diagrams.net, the desktop app or the VS Code extension).
 
-### Part 1: rules core (`game`)
+### Part 1: rules core (`game`, `game.view`, `game.enums`)
 
 `MapGraph.neighbours` is a `Map<Integer, Map<Integer, Set<TicketType>>>` (node to neighbour to modes); Mermaid can't draw a generic that nested, so it shows as `Map`.
 
@@ -47,136 +43,142 @@ The same two parts are pages in [`class-graph.drawio`](class-graph.drawio), whic
 classDiagram
     direction TB
 
-    class Game {
-        +int MAX_NAME_LENGTH$
-        +int LAST_ROUND$
-        +Set~Integer~ REVEAL_ROUNDS$
-        -String id
-        -String joinCode
-        -int maxPlayers
-        -MapGraph map
-        -Map~TicketType,Integer~ detectiveTickets
-        -InstantSource clock
-        -List~Player~ players
-        -List~MrXMove~ mrXLog
-        -GamePhase phase
-        -int round
-        -TurnPhase turnPhase
-        -Player current
-        -boolean doubleMovePending
-        -Winner winner
-        -String abortReason
-        -Instant turnStartedAt
-        +join(String name) Player
-        +host() Player
-        +start(Player requester, Random rng) void
-        ~start(Player requester, List~Player~ order, List~Integer~ startNodes) void
-        +validMoves(Player player) List~ValidMove~
-        +move(Player player, int to, String ticket) void
-        +leave(Player player) boolean
-        +kick(Player requester, String targetId) void
-        +abortIfIdle(Duration limit) boolean
-        +viewFor(Player viewer) GameState
-        +playerByToken(String token) Optional~Player~
-        +currentPlayer() Optional~Player~
-        +players() List~Player~
+    namespace game {
+        class Game {
+            +int MAX_NAME_LENGTH$
+            +int LAST_ROUND$
+            +Set~Integer~ REVEAL_ROUNDS$
+            -String id
+            -String joinCode
+            -int maxPlayers
+            -MapGraph map
+            -Map~TicketType,Integer~ detectiveTickets
+            -InstantSource clock
+            -List~Player~ players
+            -List~MrXMove~ mrXLog
+            -GamePhase phase
+            -int round
+            -TurnPhase turnPhase
+            -Player current
+            -boolean doubleMovePending
+            -Winner winner
+            -String abortReason
+            -Instant turnStartedAt
+            +join(String name) Player
+            +host() Player
+            +start(Player requester, Random rng) void
+            ~start(Player requester, List~Player~ order, List~Integer~ startNodes) void
+            +validMoves(Player player) List~ValidMove~
+            +move(Player player, int to, String ticket) void
+            +leave(Player player) void
+            +kick(Player requester, String targetId) void
+            +abortIfIdle(Duration limit) boolean
+            +viewFor(Player viewer) GameState
+            +playerByToken(String token) Optional~Player~
+            +currentPlayer() Optional~Player~
+            +players() List~Player~
+        }
+        class Player {
+            +int UNLIMITED$
+            -String id
+            -String token
+            -String name
+            -EnumMap~TicketType,Integer~ tickets
+            -Role role
+            -Integer node
+            +id() String
+            +token() String
+            +name() String
+            +role() Role
+            +node() Integer
+            +isMrX() boolean
+            +tickets() Map~TicketType,Integer~
+            +has(TicketType ticket) boolean
+            ~assign(Role role, int node, Map~TicketType,Integer~ startingTickets) void
+            ~moveTo(int node) void
+            ~spend(TicketType ticket) void
+        }
+        class MapGraph {
+            -Set~TicketType~ EDGE_MODES$
+            -byte[] json
+            -List~Integer~ nodeIds
+            -Map neighbours
+            +parse(byte[] json)$ MapGraph
+            +json() byte[]
+            +nodeIds() List~Integer~
+            +modesBetween(int a, int b) Set~TicketType~
+            +validMoves(Player player, Set~Integer~ blocked) List~ValidMove~
+        }
     }
-    class Player {
-        +int UNLIMITED$
-        -String id
-        -String token
-        -String name
-        -EnumMap~TicketType,Integer~ tickets
-        -Role role
-        -Integer node
-        +id() String
-        +token() String
-        +name() String
-        +role() Role
-        +node() Integer
-        +isMrX() boolean
-        +tickets() Map~TicketType,Integer~
-        +has(TicketType ticket) boolean
-        ~assign(Role role, int node, Map~TicketType,Integer~ startingTickets) void
-        ~moveTo(int node) void
-        ~spend(TicketType ticket) void
+    namespace game.view {
+        class GameState {
+            <<record>>
+            String gameId
+            String joinCode
+            GamePhase phase
+            int maxPlayers
+            List~PlayerView~ players
+            int round
+            TurnPhase turnPhase
+            String currentPlayerId
+            Winner winner
+            String abortReason
+            List~MrXMove~ mrXLog
+            boolean mrXDoubleMovePending
+        }
+        class PlayerView {
+            <<record>>
+            String id
+            String name
+            Role role
+            Integer nodeId
+            Map~TicketType,Integer~ tickets
+        }
+        class MrXMove {
+            <<record>>
+            int round
+            int leg
+            TicketType ticketUsed
+            Integer nodeId
+            boolean doubleMove
+        }
+        class ValidMove {
+            <<record>>
+            int nodeId
+            List~TicketType~ ticketOptions
+        }
     }
-    class MapGraph {
-        -Set~TicketType~ EDGE_MODES$
-        -byte[] json
-        -List~Integer~ nodeIds
-        -Map neighbours
-        +parse(byte[] json)$ MapGraph
-        +json() byte[]
-        +nodeIds() List~Integer~
-        +modesBetween(int a, int b) Set~TicketType~
-        +validMoves(Player player, Set~Integer~ blocked) List~ValidMove~
-    }
-    class GameState {
-        <<record>>
-        String gameId
-        String joinCode
-        GamePhase phase
-        int maxPlayers
-        List~PlayerView~ players
-        int round
-        TurnPhase turnPhase
-        String currentPlayerId
-        Winner winner
-        String abortReason
-        List~MrXMove~ mrXLog
-        boolean mrXDoubleMovePending
-    }
-    class PlayerView {
-        <<record>>
-        String id
-        String name
-        Role role
-        Integer nodeId
-        Map~TicketType,Integer~ tickets
-    }
-    class MrXMove {
-        <<record>>
-        int round
-        int leg
-        TicketType ticketUsed
-        Integer nodeId
-        boolean doubleMove
-    }
-    class ValidMove {
-        <<record>>
-        int nodeId
-        List~TicketType~ ticketOptions
-    }
-    class GamePhase {
-        <<enumeration>>
-        LOBBY
-        IN_PROGRESS
-        ENDED
-    }
-    class TurnPhase {
-        <<enumeration>>
-        MR_X_TURN
-        DETECTIVE_TURN
-    }
-    class Role {
-        <<enumeration>>
-        MR_X
-        DETECTIVE
-    }
-    class Winner {
-        <<enumeration>>
-        MR_X
-        DETECTIVES
-    }
-    class TicketType {
-        <<enumeration>>
-        ESCOOTER
-        BUS
-        TRAIN
-        FERRY
-        BLACK
-        DOUBLE
+    namespace game.enums {
+        class GamePhase {
+            <<enumeration>>
+            LOBBY
+            IN_PROGRESS
+            ENDED
+        }
+        class TurnPhase {
+            <<enumeration>>
+            MR_X_TURN
+            DETECTIVE_TURN
+        }
+        class Role {
+            <<enumeration>>
+            MR_X
+            DETECTIVE
+        }
+        class Winner {
+            <<enumeration>>
+            MR_X
+            DETECTIVES
+        }
+        class TicketType {
+            <<enumeration>>
+            ESCOOTER
+            BUS
+            TRAIN
+            FERRY
+            BLACK
+            DOUBLE
+        }
     }
 
     Game "1" *-- "1..6" Player : players
@@ -193,9 +195,9 @@ classDiagram
     Player ..> TicketType
 ```
 
-### Part 2: Spring layer (`controller`, `service`, `config`, `exception`)
+### Part 2: Spring layer (`controller`, `service`, `config`)
 
-`Game` and `GameService` throw the three exceptions. `ApiExceptionHandler` turns them into 404, 403 and 409, and an `IllegalArgumentException` or an unreadable request body into 400.
+`Game` and `GameService` throw the three exceptions from `game.exception`. `ApiExceptionHandler` turns them into 404, 403 and 409, and an `IllegalArgumentException` or an unreadable request body into 400.
 
 ```mermaid
 classDiagram
@@ -204,7 +206,7 @@ classDiagram
     namespace controller {
         class ApiExceptionHandler {
             <<RestControllerAdvice>>
-            +notFound(GameNotFoundException e) ResponseEntity
+            +notFound(NotFoundException e) ResponseEntity
             +forbidden(ForbiddenException e) ResponseEntity
             +conflict(ConflictException e) ResponseEntity
             +badRequest(IllegalArgumentException e) ResponseEntity
@@ -218,7 +220,7 @@ classDiagram
         class GameController {
             <<RestController>>
             +String TOKEN_HEADER$
-            -GameService games
+            -GameService gameService
             +createGame(CreateGameRequest req) JoinResponse
             +joinGame(JoinGameRequest req) JoinResponse
             +getGame(String id, String token) GameState
@@ -297,8 +299,8 @@ classDiagram
         }
     }
 
-    namespace exception {
-        class GameNotFoundException
+    namespace game.exception {
+        class NotFoundException
         class ForbiddenException
         class ConflictException
     }
@@ -306,6 +308,9 @@ classDiagram
     namespace game {
         class Game
         class MapGraph
+    }
+
+    namespace game.view {
         class GameState
     }
 
@@ -320,7 +325,7 @@ classDiagram
     GameService ..> JoinResponse : returns
     JoinResponse --> GameState
     HuntingMrXApplication ..> MapGraph : creates at startup
-    RuntimeException <|-- GameNotFoundException
+    RuntimeException <|-- NotFoundException
     RuntimeException <|-- ForbiddenException
     RuntimeException <|-- ConflictException
 ```

@@ -40,10 +40,12 @@ Settings live in `src/main/resources/application.properties` and nowhere else:
 
 ## Code layout
 
-- `game/`: the rules engine in plain Java (`Game`, `Player`, `MapGraph`) and the views sent to clients. No Spring in here.
+- `game/`: the rules engine in plain Java (`Game`, `Player`, `MapGraph`). No Spring in here or in its sub-packages:
+  - `game/view/`: the records sent to clients (`GameState`, `PlayerView`, `MrXMove`, `ValidMove`).
+  - `game/enums/`: `GamePhase`, `TurnPhase`, `Role`, `Winner`, `TicketType`.
+  - `game/exception/`: the three errors the rules throw, mapped to 404, 403 and 409.
 - `service/GameService`: keeps the live games, locks around every call, checks player tokens, and publishes the new state over STOMP after every change.
 - `controller/`: the REST endpoints and the error-to-status mapping (`ApiExceptionHandler`).
-- `exception/`: the three errors the rules throw, mapped to 404, 403 and 409.
 - `config/`: `GameSettings` (the `game.*` properties) and `WebSocketConfig`.
 - `HuntingMrXApplication`: loads the map once at startup; a missing or invalid map file stops the server from starting.
 

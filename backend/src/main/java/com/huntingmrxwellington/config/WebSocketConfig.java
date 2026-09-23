@@ -13,10 +13,17 @@ import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBr
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
+/** STOMP over SockJS at /ws. The server publishes game state to /topic/games/...; clients
+ *  only subscribe. See GameService.publish for the topics. */
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
+    /**
+     * An in-memory broker for /topic destinations.
+     *
+     * @param registry Spring's broker settings
+     */
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         registry.enableSimpleBroker("/topic");
@@ -32,6 +39,11 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         });
     }
 
+    /**
+     * The /ws endpoint clients connect to, open to any origin, with SockJS fallback.
+     *
+     * @param registry Spring's endpoint settings
+     */
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
@@ -39,8 +51,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 .withSockJS();
     }
 
-    /** Clients only ever subscribe. A client SEND to a /topic destination would go straight to the
-     *  broker and reach subscribers as if the server had published it, so it's dropped here. */
+    /**
+     * Drops client SEND frames. Clients only ever subscribe: a client SEND to a /topic destination
+     * would go straight to the broker and reach subscribers as if the server had published it.
+     *
+     * @param registration Spring's settings for messages coming in from clients
+     */
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
         registration.interceptors(new ChannelInterceptor() {
