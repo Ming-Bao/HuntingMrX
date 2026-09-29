@@ -1,0 +1,34 @@
+Intro:
+- Fictional boards is not really crutial
+- Engineering challange is push notificatoins and multiple languages
+- could mention push notifications
+- problem can be minimal
+
+Related works:
+- add link to geoguesser and other map related games
+- mention open tools if I'm going to talk about it later
+	- slight disconnect with the 
+
+Requirements:
+- has to run on standard hardware - web browsers
+	- web engines and versions and stuff 
+- starting game and starting server, functional, sharing via url links
+	- describe whats in scope and whats out of scope
+
+Design:
+- update the statemachine and make sure that 
+- this is for friends so we don't have to capture attention in the first 30 seonds
+	- Can expend this to disctributed online games
+- priotitizes susta
+- play eschooter for thomas
+
+Implementation:
+- usage of AI here
+- tool cretique
+
+
+critical decisions in a lot of places
+
+Need to mention why i did things certain way throughout.
+
+
