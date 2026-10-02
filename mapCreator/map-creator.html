@@ -14,9 +14,8 @@
 <div id="toolbar">
   <div class="tb-group">
     <button id="btn-load-map">Load Map</button>
-    <button id="btn-save-map" disabled>Save Map</button>
+    <button id="btn-save-map">Save Map</button>
     <button id="btn-undo"     disabled>Undo</button>
-    <button id="btn-auto-gen" disabled>Auto-Generate</button>
     <button id="btn-show-components" title="Colour every connected component differently">Show Components</button>
   </div>
 
@@ -92,10 +91,16 @@
 <!-- Hidden file input -->
 <input type="file" id="file-map" accept=".geojson,.json" style="display:none">
 
-<script src="wellington-data.js"></script>
-<script src="wellington-trains.js"></script>
-<script src="wellington-train-stops.js"></script>
-<script src="wellington-buses.js"></script>
-<script src="map-creator.js"></script>
+<script src="data/wellington-data.js"></script>
+<script src="data/wellington-train-stops.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/roads.js"></script>
+<script src="js/graph.js"></script>
+<script src="js/render.js"></script>
+<script src="js/gen-shared.js"></script>
+<script src="js/gen-train.js"></script>
+<script src="js/gen-bus.js"></script>
+<script src="js/gen-escooter.js"></script>
+<script src="js/ui.js"></script>
 </body>
 </html>

@@ -87,7 +87,7 @@ npm run dev
 
 Game settings (the idle turn limit, detective ticket budgets, which map file to load) are in `backend/src/main/resources/application.properties`. By default the backend loads the full 216-node Wellington map (`map.json`); a 5-node `test-map.json` is also bundled for fast manual testing.
 
-To regenerate or edit the map itself, see `mapCreator/` — a standalone HTML tool for placing nodes/edges on Wellington, plus a headless Selenium harness (`mapCreator/headless/`) for scripted generation and quality evaluation.
+To regenerate or edit the map itself, open `mapCreator/map-creator.html` — a standalone HTML tool for placing nodes/edges on Wellington and generating the train, bus and e-scooter networks.
 
 ---
 
