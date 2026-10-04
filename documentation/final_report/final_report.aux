@@ -1,27 +1,130 @@
 \relax 
-\citation{placeholder_web}
+\citation{rules_1983}
+\citation{repo}
 \@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {III}Requirements and Constraints}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {IV}Design}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Architecture}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Game State Machine and Turn Flow}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Domain Model}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Hidden Information and Role-Filtered State}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-E}}Map Data Design}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-F}}User Interface Design}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-G}}Real-World Issues}{1}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {V}Implementation}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {I-A}}Problem}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {I-B}}Two Themes}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {I-C}}Goals}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {I-D}}Contributions and Findings}{1}{}\protected@file@percent }
+\citation{geoguessr}
+\citation{paavilainen2017pokemon}
+\citation{paavilainen2017pokemon}
+\citation{ssy}
+\citation{tts}
+\citation{official_pc}
+\citation{yan2005cheating}
+\citation{rfc6455}
+\citation{googlemaps_pricing}
+\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{2}{}\protected@file@percent }
+\newlabel{sec:related}{{II}{2}{}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-A}}Map-Based and Location-Based Games}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-B}}Existing Digital Versions}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-C}}Cheating in Online Games}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-D}}Sending Live Updates to Browsers}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-E}}Map Tools}{2}{}\protected@file@percent }
+\citation{maplibre}
+\citation{osm}
+\citation{googlemaps_pricing}
+\citation{brooke1996sus}
+\citation{sauro2011sus}
+\citation{rules_1983}
+\citation{ssy}
+\citation{tts}
+\citation{official_pc}
+\citation{geoguessr}
+\citation{paavilainen2017pokemon}
+\citation{rules_1983}
+\citation{sauro2011sus}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Comparison With Related Systems.}}{3}{}\protected@file@percent }
+\newlabel{tab:related}{{I}{3}{}{table.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-F}}Measuring Usability}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-G}}Summary of the Gap}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {III}Requirements and Constraints}{3}{}\protected@file@percent }
+\newlabel{sec:requirements}{{III}{3}{}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}Functional Requirements}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-B}}Non-Functional Requirements}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-C}}Constraints}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-D}}Scope}{3}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces System architecture. Actions travel as REST calls; state travels back as STOMP messages, one view per player. The rules core has no web-framework dependency.}}{4}{}\protected@file@percent }
+\newlabel{fig:architecture}{{1}{4}{}{figure.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Design}{4}{}\protected@file@percent }
+\newlabel{sec:design}{{IV}{4}{}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Architecture}{4}{}\protected@file@percent }
+\newlabel{sec:architecture}{{\mbox  {IV-A}}{4}{}{subsection.4.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Game state machine as implemented. Entering Mr~X's turn first checks that he can move; if detectives hold every neighbouring node, they win. Detectives with no legal move are skipped. A lost connection is not a transition.}}{4}{}\protected@file@percent }
+\newlabel{fig:states}{{2}{4}{}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Game State Machine}{4}{}\protected@file@percent }
+\citation{googlemaps_pricing}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces One move by Mr~X. The server validates the request, then sends each player a separately built view; outside a reveal round only Mr~X's own view contains his node. Private topics are named by each player's secret token.}}{5}{}\protected@file@percent }
+\newlabel{fig:sequence}{{3}{5}{}{figure.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Domain Model}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Hidden Information and Role-Filtered State}{5}{}\protected@file@percent }
+\newlabel{sec:hidden}{{\mbox  {IV-D}}{5}{}{subsection.4.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-E}}Map Data Design}{5}{}\protected@file@percent }
+\newlabel{sec:mapdesign}{{\mbox  {IV-E}}{5}{}{subsection.4.5}{}}
+\citation{osm}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces The Wellington board: 216 nodes and 372 edges over about 22~km by 24~km. Edges follow their pre-computed paths and are coloured by mode; most carry both e-scooter and bus. Map data \textcopyright \ OpenStreetMap contributors (ODbL).}}{6}{}\protected@file@percent }
+\newlabel{fig:graph}{{4}{6}{}{figure.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-F}}User Interface Design}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-G}}Real-World Issues}{6}{}\protected@file@percent }
+\newlabel{fig:board-mrx}{{5a}{7}{}{subfigure.5.1}{}}
+\newlabel{sub@fig:board-mrx}{{(a)}{a}}
+\newlabel{fig:board-det}{{5b}{7}{}{subfigure.5.2}{}}
+\newlabel{sub@fig:board-det}{{(b)}{b}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces The game board in round~1, after Mr~X has moved by e-scooter. (a)~Mr~X sees his own marker, his unlimited ordinary tickets and his Invisible and Double tickets. (b)~In a detective's view of the same game, Mr~X's node shows as ``?'', and each reachable node offers a button per ticket that can pay for it. Both players receive the same log entry, but only Mr~X's view contains his position.}}{7}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {subfigure}{\numberline{(a)}{\ignorespaces {Mr~X's view.}}}{7}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {subfigure}{\numberline{(b)}{\ignorespaces {A detective's view.}}}{7}{}\protected@file@percent }
+\newlabel{fig:board}{{5}{7}{}{figure.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Technology Stack.}}{7}{}\protected@file@percent }
+\newlabel{tab:stack}{{II}{7}{}{table.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {V}Implementation}{7}{}\protected@file@percent }
+\newlabel{sec:implementation}{{V}{7}{}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Technology Choices}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Server}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Client}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Resilience to Dropped Connections}{7}{}\protected@file@percent }
+\newlabel{sec:resilience}{{\mbox  {V-D}}{7}{}{subsection.5.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-E}}Building the Wellington Map}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-F}}Deployment}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-G}}Development Process and Use of AI}{8}{}\protected@file@percent }
+\newlabel{sec:process}{{\mbox  {V-G}}{8}{}{subsection.5.7}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Evaluation}{8}{}\protected@file@percent }
+\newlabel{sec:evaluation}{{VI}{8}{}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Map Library Benchmark}{8}{}\protected@file@percent }
+\newlabel{sec:benchmark}{{\mbox  {VI-A}}{8}{}{subsection.6.1}{}}
+\citation{sauro2011sus}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Mean render time over 10 runs per library, with one standard deviation as error bars (Firefox, Selenium, local server). Means for the stress scenario: Google Maps 2.69~s, Leaflet 2.21~s, MapLibre GL 2.31~s.}}{9}{}\protected@file@percent }
+\newlabel{fig:benchmark}{{6}{9}{}{figure.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Automated Test Suite.}}{9}{}\protected@file@percent }
+\newlabel{tab:tests}{{III}{9}{}{table.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Functional Correctness}{9}{}\protected@file@percent }
+\newlabel{sec:correctness}{{\mbox  {VI-B}}{9}{}{subsection.6.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {IV}{\ignorespaces Play-Test Findings and Resulting Changes.}}{9}{}\protected@file@percent }
+\newlabel{tab:feedback}{{IV}{9}{}{table.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}User Evaluation}{9}{}\protected@file@percent }
+\newlabel{sec:users}{{\mbox  {VI-C}}{9}{}{subsection.6.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {V}{\ignorespaces Requirements and Outcomes.}}{10}{}\protected@file@percent }
+\newlabel{tab:trace}{{V}{10}{}{table.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-D}}Requirements Traceability}{10}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Discussion}{10}{}\protected@file@percent }
+\newlabel{sec:discussion}{{VII}{10}{}{section.7}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusions and Future Work}{10}{}\protected@file@percent }
+\newlabel{sec:conclusion}{{VIII}{10}{}{section.8}{}}
 \bibstyle{IEEEtran}
 \bibdata{references}
-\bibcite{placeholder_web}{1}
-\@writefile{toc}{\contentsline {section}{\numberline {VI}Evaluation}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Map Library Benchmark}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Functional Correctness}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}Performance and Multiplayer Synchronisation}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-D}}User Evaluation}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-E}}Requirements Traceability}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {VII}Discussion}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusions and Future Work}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{References}{2}{}\protected@file@percent }
-\gdef \@abspage@last{2}
+\bibcite{rules_1983}{1}
+\bibcite{repo}{2}
+\bibcite{geoguessr}{3}
+\bibcite{paavilainen2017pokemon}{4}
+\bibcite{ssy}{5}
+\bibcite{tts}{6}
+\bibcite{official_pc}{7}
+\bibcite{yan2005cheating}{8}
+\bibcite{rfc6455}{9}
+\bibcite{googlemaps_pricing}{10}
+\bibcite{maplibre}{11}
+\bibcite{osm}{12}
+\bibcite{brooke1996sus}{13}
+\bibcite{sauro2011sus}{14}
+\@writefile{toc}{\contentsline {section}{References}{11}{}\protected@file@percent }
+\gdef \@abspage@last{11}
