@@ -30,6 +30,7 @@
 \usetikzlibrary{arrows.meta,positioning,fit,calc}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18} 
+\newcommand{\reqs}[1]{\noindent\textit{Requirements addressed: #1.}\par\smallskip}
 \hyphenation{op-tical net-works semi-conduc-tor IEEE-Xplore Map-Libre Web-Socket}
 
 \begin{document}
@@ -47,7 +48,7 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \begin{abstract}
-University Open Days need demonstrations that prospective students can try for themselves, while hidden-movement board games need a group of friends around one table. This project turns such a game into an online multiplayer game, played over the internet in a web browser on a real map, as a showpiece for Open Days. \emph{Hunting Mr.~X: Wellington Edition} is a real-time multiplayer game in which one player, Mr~X, hides on a 216-node, 372-edge graph of Wellington's bus, train, ferry and e-scooter network while up to five detectives hunt for him. The engineering challenge is keeping several browsers consistent through server push while guaranteeing that the hidden position never reaches a detective's device in an unintended fashion, across a Java server and a TypeScript client. The system uses an authoritative Spring Boot server holding all rules in plain Java, per-player filtered views pushed over STOMP and WebSocket, and a Vue and MapLibre GL client that draws a pre-computed graph over open map tiles. In evaluation, 135 automated tests reached 99.2\% line coverage and killed all 199 generated mutants, and seven players gave a System Usability Scale score of 72.5, above the average of 68. The game is deployed and was demonstrated successfully at a university Open Day.
+The current open day demo for VUW is over five years old and is outdated. A good demonstration matters because, for many visitors, it is their first look at the challenges they would face in the degree and at what a student can build by its final year. This project shows that a single fourth-year student can turn a classic hidden-movement board game, normally played around one table, into a complete real-time online multiplayer game on a real map of Wellington, playable from any desktop browser, and it was demonstrated successfully at an Open Day. The game gives future Open Days a playable conversation starter about real software development challenges, such as keeping every player's screen up to date and keeping one player's position secret.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -61,6 +62,28 @@ Multiplayer game, hidden information, server push, WebSocket, map overlay, onlin
 
 An online version removes both. A server can hold Mr~X's position, check every move against the rules, and show each player only what they are allowed to see. Players can then join from their own device, from anywhere, with a link or code.
 
+The project began when Jens Dietrich, the primary supervisor, suggested a hidden-movement board game as a demonstration for the university's Open Day.
+
+\subsection{How the Game Is Played}\label{sec:rules}
+\emph{Hunting Mr.~X} is played by two to six people. One is chosen at random to be Mr~X and the rest are detectives, who work together to catch him. The board is a map of Wellington with 216 numbered locations (nodes) joined by routes (edges). Each route is served by one or more transport modes: e-scooter, bus, train or ferry.
+\begin{itemize}
+	\item \emph{Moving.} The game lasts up to 24 rounds. In each round Mr~X moves first, then each detective in turn. A move goes along one route to a neighbouring node and costs one ticket for a mode that serves that route.
+	\item \emph{Tickets.} Each detective starts with 12 e-scooter, 8 bus, 6 train and 2 ferry tickets. Each move uses a ticket, so detectives must plan. Mr~X has unlimited ordinary tickets.
+	\item \emph{Hiding.} The detectives always see each other, but not Mr~X. After each of his moves they see only which ticket he used, recorded in a log. His position is revealed only after his move in rounds 2, 8, 13, 18 and 24.
+	\item \emph{Special tickets.} Mr~X also has one Invisible ticket per detective, which works on any route and hides which mode he used, and two Double tickets, each letting him move twice in one turn.
+	\item \emph{Winning.} The detectives win if one of them lands on Mr~X's node, or if he cannot move because detectives block every node next to him. Mr~X wins if he is still free after round 24.
+\end{itemize}
+Fig.~\ref{fig:board} shows the game board as each side sees it.
+
+\begin{figure*}[!t]
+\centering
+\subfloat[Mr~X's view.]{\includegraphics[width=0.49\textwidth]{figures/board-mrx.jpg}\label{fig:board-mrx}}
+\hfil
+\subfloat[A detective's view.]{\includegraphics[width=0.49\textwidth]{figures/board-detective.jpg}\label{fig:board-det}}
+\caption{The game board in round~1, after Mr~X has moved by e-scooter. (a)~Mr~X sees his own marker, his unlimited ordinary tickets and his Invisible and Double tickets. (b)~In a detective's view of the same game, Mr~X's node shows as ``?'', and each reachable node offers a button per ticket that can pay for it. Both players receive the same log entry, but only Mr~X's view contains his position.}
+\label{fig:board}
+\end{figure*}
+
 \subsection{Problem}
 The problem is deliberately narrow: \emph{build a browser-based, real-time multiplayer hidden-movement game, played on a map of a real city, in which the rules and the secret are enforced by the system rather than by the players.} Wellington was chosen because a familiar map makes the game instantly recognisable to local players and Open Day visitors.
 
@@ -73,19 +96,20 @@ The engineering difficulty lies in two places:
 \subsection{Two Themes}
 Two themes run through the project and shape decisions in every later section.
 
-\emph{A showpiece for Open Days.} The university's Open Days need demonstrations that show prospective students what engineering students build, in a form a visitor can try in a few minutes. A game on a map of their own city, with no app to install or account to create, fits that purpose: several groups can play at once on the stand's laptops while a big screen shows the board.
+\emph{A showpiece for Open Days.} The university's Open Days need demonstrations that show prospective students what engineering students build, in a form a visitor can try in a few minutes. The software engineering demonstration in use before this project was over five years old and outdated. A new one should start conversations with visitors about the challenges they can expect in software development, and show what a fourth-year student can build. A game on a map of their own city, with no app to install or account to create, fits that purpose: several groups can play at once on the stand's laptops while a big screen shows the board.
 
 \emph{Online multiplayer over the internet.} The board game can only be played by people sitting at the same table. Here each player joins from their own computer, wherever they are, using a link or a six-character code, and the server keeps every player's screen up to date as moves happen. This is what turns the board game into a networked system, and it is where most of the engineering effort lies.
 
 Sustainability is a secondary consideration. Every transport mode in the game is a low-emission one (e-scooter, bus, train and ferry, with the board game's taxi replaced by the e-scooter), and the infrastructure was kept small; both points are discussed in Section~\ref{sec:design}.
 
 \subsection{Goals}
-The goals were set in the proposal and refined into measurable targets in Section~\ref{sec:requirements}; Section~\ref{sec:evaluation} returns to each:
+The project has three goals, set in the proposal:
 \begin{enumerate}
-	\item Enforce every game rule on the server: movement, tickets, turn order, reveal rounds, the double move and Invisible ticket, and every end condition.
-	\item Never send Mr~X's position to a detective's browser except on a reveal round.
-	\item Reach a System Usability Scale (SUS) score above the average of 68.
+	\item Enforce every game rule on the server: movement, tickets, turn order, reveal rounds, the double move and Invisible ticket, and every end condition (requirements F1--F6).
+	\item Never send Mr~X's position to a detective's browser except on a reveal round (F4).
+	\item Reach a System Usability Scale (SUS) score above the average of 68 (N3).
 \end{enumerate}
+Section~\ref{sec:requirements} breaks these goals into numbered requirements. Those numbers are the backbone of the rest of the report: each design and implementation subsection begins by listing the requirements it addresses, and Section~\ref{sec:trace} checks every requirement against its evidence.
 
 \subsection{Contributions and Findings}
 The project delivers a deployed, playable game \cite{repo}; a curated, pre-computed graph of the Wellington region together with the tool used to build it; an authoritative server that filters state per viewer; and an evaluation combining a map-library benchmark, a layered automated test suite checked by coverage and mutation testing, and user testing with a usability questionnaire. All three goals were met. The main limitations are a small user sample and the lack of automated frontend tests.
@@ -100,7 +124,7 @@ Section~\ref{sec:related} reviews related games and technologies, Section~\ref{s
 \subsection{Map-Based and Location-Based Games}
 Games that use real geography fall into two groups. \emph{Map-based} games use a real map as the board while the player sits still. GeoGuessr \cite{geoguessr} drops players into a street-level panorama and asks them to place it on a world map; its popularity shows that recognising real places is enjoyable in itself. But GeoGuessr's map is a backdrop for a guessing task: there is no movement network, and its multiplayer modes are races rather than games of hidden information between opponents.
 
-\emph{Location-based} games such as Pok\'emon GO \cite{paavilainen2017pokemon} take the opposite approach and use the player's physical position, so the city itself is the board. Paavilainen \emph{et al.} \cite{paavilainen2017pokemon} attribute Pok\'emon GO's mass appeal partly to this blending of play with everyday places, but also note the drawbacks: play depends on where a player lives and how far they can travel, and strategic interaction between players is limited.
+\emph{Location-based} games such as Pok\'emon GO \cite{paavilainen2017pokemon} take the opposite approach and use the player's physical position, so the city itself is the board. Paavilainen \emph{et al.} \cite{paavilainen2017pokemon} attribute Pok\'emon GO's mass appeal partly to the fun of moving around the real world and the sociability it brings, but also note the drawbacks: players in rural areas have far fewer places to play, and some found the game's mechanics too simple.
 
 This project sits between the two groups. It keeps the strategy of the board game and the recognisability of a real city, but moves the players' tokens rather than the players. That avoids the safety, accessibility and location problems of physical play while keeping the appeal of a familiar map.
 
@@ -114,7 +138,7 @@ Three digital versions of the board game were reviewed:
 All three use the fictional printed board, and none is a free online game that can be opened from a link.
 
 \subsection{Cheating in Online Games}
-Making the game playable over the internet, one of this project's two themes, brings a problem the printed board game never has: keeping Mr~X's position secret when every player's device is connected to the game. Research on cheating in online games is therefore relevant to the design. If the server sends Mr~X's position to every player and the detectives' screens simply do not display it, a detective can still find it, for example by opening the browser's developer tools. Yan and Randell \cite{yan2005cheating} list this, sending players information they are not supposed to see, as a common way of cheating in online games. The usual fix is to make the server the only part of the system that knows the full game state: players send the moves they want to make, the server decides what happens, and each player receives only what they are allowed to see. This was not a theoretical risk for this project. Earlier versions of the game had exactly this weakness: player identifiers that every client received also worked as credentials and players could request for Mrxs' location. The risk is greater because the project is open source. Anyone can read the repository to find which endpoints to call, and AI coding assistants make this easy even for players with little programming experience. A couple of user testers did exactly that, using AI to read the code and call the API directly to find Mr~X. Secrecy therefore cannot depend on the code being hidden; it has to come from the server refusing to give out information. Section~\ref{sec:hidden} describes how the final version does that.
+Making the game playable over the internet, one of this project's two themes, brings a problem the printed board game never has: keeping Mr~X's position secret when every player's device is connected to the game. Research on cheating in online games is therefore relevant to the design. If the server sends Mr~X's position to every player and the detectives' screens simply do not display it, a detective can still find it, for example by opening the browser's developer tools. Yan and Randell \cite{yan2005cheating} call this cheating by exploiting misplaced trust: too much trust is placed in the game client, which a cheating player fully controls, and they note that hiding how the client works only delays such cheating. The usual fix is to make the server the only part of the system that knows the full game state: players send the moves they want to make, the server decides what happens, and each player receives only what they are allowed to see. This was not a theoretical risk for this project. Earlier versions of the game had exactly this weakness: player identifiers that every client received also worked as credentials and players could request for Mrxs' location. The risk is greater because the project is open source. Anyone can read the repository to find which endpoints to call, and AI coding assistants make this easy even for players with little programming experience. A couple of user testers did exactly that, using AI to read the code and call the API directly to find Mr~X. Secrecy therefore cannot depend on the code being hidden; it has to come from the server refusing to give out information. Section~\ref{sec:hidden} describes how the final version does that.
 
 \subsection{Sending Live Updates to Browsers}
 In an online game, when one player moves, every other player's screen has to update straight away. Normally a browser only gets data when it asks for it, so there are three common ways to do this:
@@ -137,16 +161,16 @@ The free libraries need map data from somewhere. OpenStreetMap (OSM) is a free, 
 The game also needs each route between two nodes to follow real roads. Routing services such as Google's can work out a road path between two points, but each request costs money and takes time \cite{googlemaps_pricing}. Using the free tools instead, the board can be built from real map data without paying per request. Sections~\ref{sec:mapdesign} and~\ref{sec:benchmark} explain how the tools were chosen.
 
 \subsection{Measuring Usability}
-The System Usability Scale \cite{brooke1996sus} is a 10-item questionnaire scored from 0 to 100. It is short, technology-agnostic and reliable with small samples. Across hundreds of studies the mean score is about 68 \cite{sauro2011sus}.
+The System Usability Scale (SUS) \cite{brooke1996sus} is a standard questionnaire for measuring how easy a system is to use. It has 10 statements, such as ``I thought the system was easy to use'' and ``I found the system unnecessarily complex'', which alternate between positive and negative. Each is rated from 1 (strongly disagree) to 5 (strongly agree), and the answers are combined into a single score from 0 to 100. The score is not a percentage: across hundreds of published studies the average is about 68 \cite{sauro2011sus}, so a score above 68 means a system is easier to use than most. SUS was chosen for this project, as planned in the proposal, because it takes players about two minutes after a game, is free to use, gives reliable results even with small groups, and lets the result be compared with that published average rather than judged on its own. The full questionnaire is linked in Appendix~\ref{app:sus}.
 
 \subsection{Summary of the Gap}
 No system found combines the four properties this project targets: the strategic depth of a hidden-movement board game, a real city's transport network as the board, real-time play in an ordinary browser opened from a link, and a server that keeps the hidden player's position secret. Table~\ref{tab:related} summarises the comparison.
 
-\begin{table}[!t]
+\begin{table*}[!t]
 \caption{Comparison With Related Systems.}
 \label{tab:related}
 \centering
-\setlength{\tabcolsep}{3pt}
+\small
 \begin{tabular}{@{}lccccc@{}}
 \toprule
 System & Real map & Online & Browser & Rules & Strategy \\
@@ -160,13 +184,15 @@ Pok\'emon GO \cite{paavilainen2017pokemon} & Yes & Yes & No & Software & Low \\
 \textbf{This project} & \textbf{Yes} & \textbf{Yes} & \textbf{Yes} & \textbf{Software} & \textbf{High} \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Requirements and Constraints}\label{sec:requirements}
 
+Each requirement has an identifier (F for functional, N for non-functional, C for constraint) that the later sections refer to.
+
 \subsection{Functional Requirements}
-The rules follow the board game \cite{rules_1983}, adapted to Wellington:
+The rules follow the board game \cite{rules_1983}, adapted to Wellington (Section~\ref{sec:rules}):
 \begin{description}
 	\item[F1] \emph{Lobby.} A host creates a game for two to six players and shares it by a six-character code, a link or a QR code. The host can remove players and start the game.
 	\item[F2] \emph{Roles.} At the start, one player is chosen at random as Mr~X and the rest become detectives; everyone starts on a different random node.
@@ -193,18 +219,24 @@ The rules follow the board game \cite{rules_1983}, adapted to Wellington:
 \end{description}
 
 \subsection{Scope}
-\emph{In scope:} desktop browser play among friends who already know each other and talk by voice or in person; sharing a game by link or QR code; starting the whole server from one container image; and everything in F1--F7.
+The game has two audiences, and the scope follows from them.
+\begin{itemize}
+	\item \emph{Friends playing together} have already agreed to play and want a 30--60 minute game that is clear and fair. They play from their own computers and talk by voice or in person.
+	\item \emph{Open Day visitors} try the game at a stand on the stand's laptops. A demonstrator introduces it and sets up the lobby, so the interface does not have to win a stranger's attention in the first 30~seconds on its own; it has to let a newcomer join in seconds and understand a move after one explanation.
+\end{itemize}
+\emph{In scope:} desktop browser play; sharing a game by link, code or QR code; starting the whole server from one container image; and everything in F1--F7.
 \emph{Out of scope:} user accounts and saved games; a mobile-first layout; computer-controlled opponents; in-game chat; and any use of players' real locations.
-There are two audiences. Friends who have agreed to play want a 30--60 minute game that is clear and fair. Open Day visitors try the game at a stand where a demonstrator introduces it, and sets up the lobby, so the interface does not have to win a stranger's attention in the first 30~seconds on its own; it has to let a newcomer join in seconds and understand a move after one explanation.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Design}\label{sec:design}
 
 \subsection{Architecture}\label{sec:architecture}
+\reqs{F4, N1, N2, C1, C2}
 The system is a client--server design with an \emph{authoritative} server (Fig.~\ref{fig:architecture}). The server holds every game in memory, applies every rule, and decides what each player may see. Browsers send intentions (``move to node 42 by bus'') as Representational State Transfer (REST) calls and receive state on STOMP topics; they never compute an outcome themselves.
 
-\begin{figure}[!t]
+\begin{figure*}[!t]
 \centering
+\resizebox{0.62\textwidth}{!}{%
 \begin{tikzpicture}[
   font=\scriptsize,
   box/.style={draw, rounded corners=2pt, align=center, minimum height=5.5mm, inner sep=2pt, fill=white, text width=28mm},
@@ -226,17 +258,18 @@ The system is a client--server design with an \emph{authoritative} server (Fig.~
   \draw[arr] (broker.west) -- node[below]{push} (api.east |- broker.west) ;
   \draw[arr] (map.north) -- (server.south);
   \draw[arr] (tiles.north) -- (browser.south);
-\end{tikzpicture}
+\end{tikzpicture}%
+}
 \caption{System architecture. Actions travel as REST calls; state travels back as STOMP messages, one view per player. The rules core has no web-framework dependency.}
 \label{fig:architecture}
-\end{figure}
+\end{figure*}
 
 The alternative considered was a \emph{host-authoritative} design, in which the host's browser runs the rules and the other players connect to it. It was rejected for two reasons. The host's browser would hold the full game state, including Mr~X's position, so whenever the host played as a detective the secret would be on their device, breaking goal~2. And the game would end for everyone if the host closed the tab or their laptop went to sleep. A dedicated server avoids both problems, and it suits C2 because the home server already existed.
 
 \emph{How browsers and the server talk.} Communication is split into two directions:
 \begin{itemize}
 	\item \emph{Player actions} (create, join, start, move, leave) are ordinary web requests (REST). The main reason is error handling: when a move is illegal or it is not that player's turn, the server can simply reply with an error code and a message, which the browser shows to the player. Ordinary requests are also easy to test.
-	\item \emph{Updates} Updates travel the other way over STOMP on a Web-Socket. Each browser subscribes to its game’s topic and its own private topic, and the server pushes the new state as soon as anything changes. Browsers never send anything on this connection; they only listen.
+	\item \emph{Updates} travel the other way over STOMP on a WebSocket. In the lobby, each browser subscribes to the game's public topic. On the game board it subscribes instead to two private topics named by the player's secret token: one for the player's own view of the game and one for their legal moves. The server pushes new state to these topics as soon as anything changes. Browsers only subscribe and listen; any message a browser tries to send on this connection is dropped by the server.
 \end{itemize}
 The other options from Section~\ref{sec:related} were rejected. Polling alone would make every move take up to one polling interval to appear on other screens (6~s at the rate used here). Server-Sent Events could push updates just as quickly, but STOMP's topics already give one channel per game and per player without extra code, and SockJS lets the connection fall back to ordinary HTTP on networks that block WebSockets (N1). Polling is still used as a backup in case a pushed update is missed (Section~\ref{sec:resilience}).
 
@@ -244,11 +277,13 @@ The other options from Section~\ref{sec:related} were rejected. Polling alone wo
 
 \emph{Two languages, one contract.} Java was chosen for the server over Node.js because Spring provides a STOMP broker out of the box, and Java has mature coverage (JaCoCo) and mutation (PIT) tools for the test-quality measures promised in the proposal. The cost is that client and server cannot share types. The design answers this with one written contract: an OpenAPI 3.1 file documenting every REST endpoint and every STOMP topic, which must change in the same commit as any change to either side (Section~\ref{sec:process}).
 
-\subsection{Game State Machine}
+\subsection{Game State Machine}\label{sec:states}
+\reqs{F1, F3, F6}
 Every operation is checked against the game's state, so an out-of-order request is rejected rather than half-applied. Fig.~\ref{fig:states} shows the state machine as implemented. It was revised during the project to match the code: an early ``paused on disconnect'' state was removed (Section~\ref{sec:resilience}); ``boxed in'' was added as a detective win after a review found that games froze in that position; and ``round end'' became a transition rather than a state, because nothing waits there.
 
-\begin{figure}[!t]
+\begin{figure*}[!t]
 \centering
+\resizebox{0.7\textwidth}{!}{%
 \begin{tikzpicture}[
   font=\scriptsize,
   st/.style={draw, rounded corners=3pt, align=center, minimum height=6mm, minimum width=15mm, fill=white},
@@ -276,10 +311,11 @@ Every operation is checked against the game's state, so an out-of-order request 
   \draw[arr] (dw.north |- 0,-3.35) -- node[left, align=right]{caught or\\boxed in} (dw);
   \draw[arr] (xw.north |- 0,-3.35) -- node[right, align=left]{survived\\round 24} (xw);
   \draw[arr] (ab.north |- 0,-3.35) -- node[right, align=left]{player left or\\15 min idle} (ab);
-\end{tikzpicture}
+\end{tikzpicture}%
+}
 \caption{Game state machine as implemented. Entering Mr~X's turn first checks that he can move; if detectives hold every neighbouring node, they win. Detectives with no legal move are skipped. A lost connection is not a transition.}
 \label{fig:states}
-\end{figure}
+\end{figure*}
 
 Two rules cover players who stop playing; neither comes from the board game, which assumes everyone stays at the table.
 
@@ -287,30 +323,34 @@ Two rules cover players who stop playing; neither comes from the board game, whi
 
 \emph{Idle games are ended after 15 minutes.} If the player whose turn it is makes no move for 15 minutes, the game ends. Without this, a closed or forgotten tab would leave the other players waiting indefinitely, and the server would keep the game in memory forever. Shorter limits, or skipping a slow player's turn automatically, were rejected because players among friends often discuss a move for several minutes; 15 minutes is far longer than any turn in play-testing, so it only catches abandoned games.
 
-\subsection{Domain Model}
+\subsection{Domain Model}\label{sec:domain}
+\reqs{F1--F6}
 All rules live in three plain Java classes with no framework dependency: \texttt{Game} (lobby, start, moves, turns, reveals, endings, leaving, the idle abort and per-viewer views), \texttt{Player} (identity, role, position and tickets) and \texttt{MapGraph} (the board as sets of transport modes between adjacent nodes). A thin \texttt{GameService} keeps the live games, locks a game for every call, resolves player tokens and publishes new state. This split came from a mid-project rewrite. Originally the rules were spread through the Spring service and a lobby/Mr~X/detective class hierarchy, which made them hard to test without mocking the graph. With the rules in a plain class, a test builds a game on a small hand-drawn map with exact start positions and checks one rule at a time. Unlimited tickets are stored as $-1$, so Mr~X and detectives share one ticket model, and the random source and clock are injected so a test can fix the roles or jump 15 minutes ahead.
 
 \subsection{Hidden Information and Role-Filtered State}\label{sec:hidden}
+\reqs{F4 (goal~2)}
 Goal~2 is achieved by never building a message that contains Mr~X's position for anyone but him. \texttt{Game.viewFor(viewer)} builds a separate snapshot for each viewer: Mr~X sees everything, and anyone else sees his node only after he has finished a move in a reveal round. Mr~X's move log carries his node only on a reveal round's final leg, the same for every viewer. After every change, the server publishes the public view to the game's topic, each player's own view to a private topic, and the legal moves to the player whose turn it is (Fig.~\ref{fig:sequence}).
 
-\begin{figure}[!t]
+\begin{figure*}[!t]
 \centering
+\resizebox{0.75\textwidth}{!}{%
 \begin{tikzpicture}[font=\scriptsize, arr/.style={-{Stealth[length=1.6mm]}},
   life/.style={draw, gray, dashed}, every node/.append style={fill=white, inner sep=1pt}]
   \foreach \x/\n/\l in {0/a/Mr~X's browser, 2.4/s/Server, 4.8/b/Detective~1, 7.0/c/Detective~2}{
-    \node[draw, fill=white, align=center, text width=12mm] (\n) at (\x,0) {\l};
+    \node[draw, fill=white, align=center, text width=14mm] (\n) at (\x,0) {\l};
     \draw[life] (\n.south) -- ++(0,-3.9);
   }
   \draw[arr] (0,-0.65) -- node[above]{POST move + token} (2.4,-0.65);
-  \node[draw, fill=white, align=center, text width=21mm, font=\tiny] at (2.4,-1.3) {check token, turn, edge,\\ticket, not onto detective};
+  \node[draw, fill=white, align=center, text width=26mm] at (2.4,-1.3) {check token, turn, edge,\\ticket, not onto detective};
   \draw[arr] (2.4,-2.0) -- node[above]{own view (full)} (0,-2.0);
   \draw[arr] (2.4,-2.45) -- node[above]{own view, Mr~X = null} (4.8,-2.45);
   \draw[arr] (2.4,-2.9) -- node[above, pos=0.75]{own view, Mr~X = null} (7.0,-2.9);
   \draw[arr] (2.4,-3.4) -- node[above]{legal moves} (4.8,-3.4);
-\end{tikzpicture}
+\end{tikzpicture}%
+}
 \caption{One move by Mr~X. The server validates the request, then sends each player a separately built view; outside a reveal round only Mr~X's own view contains his node. Private topics are named by each player's secret token.}
 \label{fig:sequence}
-\end{figure}
+\end{figure*}
 
 Filtering the payload is necessary but not sufficient: a detective must also be unable to \emph{obtain} Mr~X's view. A late-project review found that the first implementation failed this in several ways. Player identifiers, which every client receives, doubled as credentials, so any player could request Mr~X's view. The in-memory STOMP broker honoured wildcard subscriptions such as \texttt{/topic/games/\{id\}/players/**}, delivering every private view to an eavesdropper. It also relayed messages that clients sent to a topic as if the server had sent them. The redesign separates identity from authority:
 \begin{itemize}
@@ -321,21 +361,23 @@ Filtering the payload is necessary but not sufficient: a detective must also be 
 Accounts and logins were considered and rejected: they add friction to a casual game among friends and protect nothing a per-game secret does not.
 
 \subsection{Map Data Design}\label{sec:mapdesign}
+\reqs{F7, C1}
 The board is a static JSON file of nodes, with latitude and longitude, and undirected edges, each listing its transport modes and a pre-computed line of coordinates along the real road or rail line. The server reads it once at start-up, validates it (an unknown mode or a dangling edge stops the server) and serves it to every client.
 
-Live routing was the first idea and was rejected on cost and speed. Each edge needs a road path between two nodes. With about 400 edges and a directions service billed per thousand requests \cite{googlemaps_pricing}, every board load, or a cache to avoid repeating it, would add cost (C1); and an early prototype using a routing plug-in for Leaflet became unresponsive with a few hundred routes. The network does not change during a game, so paths are computed once, offline, from OSM road data, and stored with the graph. At run time the cost is one file download.
+Live routing was the first idea and was rejected on cost and speed. Each edge needs a road path between two nodes. With about 400 edges and a directions service billed per request beyond a small free monthly allowance \cite{googlemaps_pricing}, every board load, or a cache to avoid repeating it, would add cost (C1); and an early prototype using a routing plug-in for Leaflet became unresponsive with a few hundred routes. The network does not change during a game, so paths are computed once, offline, from OSM road data, and stored with the graph. At run time the cost is one file download.
 
 The graph's shape was designed for play rather than as an exact copy of the transport network (Fig.~\ref{fig:graph}). Five clusters cover Wellington city, the Hutt Valley and the northern suburbs. Within each, nodes are joined by e-scooter and bus edges along streets, so most moves are short and local. A few train edges join the clusters quickly, and a ferry crosses the harbour. This mirrors the board game, where plentiful short moves are mixed with scarce long jumps, and the detectives' limited train and ferry tickets (6 and 2) make those jumps a resource to manage. Every edge is labelled with low-emission modes only, in keeping with Wellington's public transport and shared e-scooters. The train and ferry edges follow the real rail lines and harbour crossing, but bus and e-scooter edges simply follow Wellington roads; the map creator does not check them against real bus routes or e-scooter operating zones, so they represent what each mode could plausibly do rather than the actual network.
 
-\begin{figure}[!t]
+\begin{figure*}[!t]
 \centering
-\includegraphics[width=0.92\columnwidth]{figures/wellington-graph.pdf}
+\includegraphics[width=0.62\textwidth]{figures/wellington-graph.pdf}
 \caption{The Wellington board: 216 nodes and 372 edges over about 22~km by 24~km. Edges follow their pre-computed paths and are coloured by mode; most carry both e-scooter and bus. Map data \textcopyright\ OpenStreetMap contributors (ODbL).}
 \label{fig:graph}
-\end{figure}
+\end{figure*}
 
-\subsection{User Interface Design}
-The interface has six screens: home, create, join, lobby, game board and game over. The lobby is the screen where players wait for the game to start. At the top it shows three ways for the host to invite others: the six-character join code, a link that opens the join page with the code already filled in, and a QR code of that link. The QR code was added with an Open Day stand in mind, so a visitor could scan it and join from their phone. In practice it is of little use: joining works, but the board was designed for a desktop screen, and on a phone the map and side panel do not fit well enough to play. The board (Fig.~\ref{fig:board}) splits the window between the map and a side panel. The map draws each edge in its mode's colour and each node as a small pie chart of the modes that stop there; players appear as rings in their own colour with a role symbol. The side panel lists players, the viewer's tickets, Mr~X's ticket log with reveal rows, every reachable node with a button for each ticket that can pay for it, and the move to confirm. Clicking a reachable node on the map opens the same ticket buttons beside the node, so a move can be made without looking away from the map.
+\subsection{User Interface Design}\label{sec:ui}
+\reqs{F1, N1, N3}
+The interface has six screens: home, create, join, lobby, game board and game over (Figs.~\ref{fig:board} and~\ref{fig:pages}). The lobby is the screen where players wait for the game to start. At the top it shows three ways for the host to invite others: the six-character join code, a link that opens the join page with the code already filled in, and a QR code of that link. The QR code was added with an Open Day stand in mind, so a visitor could scan it and join from their phone. The board (Fig.~\ref{fig:board}) splits the window between the map and a side panel. The map draws each edge in its mode's colour and each node as a small pie chart of the modes that stop there; players appear as rings in their own colour with a role symbol. The side panel lists players, the viewer's tickets, Mr~X's ticket log with reveal rows, every reachable node with a button for each ticket that can pay for it, and the move to confirm. Clicking a reachable node on the map opens the same ticket buttons beside the node, so a move can be made without looking away from the map.
 
 \emph{Designing for committed players.} Both audiences in Section~\ref{sec:requirements} arrive having already decided to play: friends have agreed on a game, and Open Day visitors have been introduced to it by a demonstrator. The interface therefore does not need to grab attention in the first 30~seconds, as an app competing in a store or a casual web game must, and this changed several design choices:
 \begin{itemize}
@@ -350,15 +392,22 @@ Several of these features came from user testing (Section~\ref{sec:users}): the 
 
 \begin{figure*}[!t]
 \centering
-\subfloat[Mr~X's view.]{\includegraphics[width=0.49\textwidth]{figures/board-mrx.jpg}\label{fig:board-mrx}}
-\hfil
-\subfloat[A detective's view.]{\includegraphics[width=0.49\textwidth]{figures/board-detective.jpg}\label{fig:board-det}}
-\caption{The game board in round~1, after Mr~X has moved by e-scooter. (a)~Mr~X sees his own marker, his unlimited ordinary tickets and his Invisible and Double tickets. (b)~In a detective's view of the same game, Mr~X's node shows as ``?'', and each reachable node offers a button per ticket that can pay for it. Both players receive the same log entry, but only Mr~X's view contains his position.}
-\label{fig:board}
+\begin{minipage}[c]{0.38\textwidth}
+\centering
+\subfloat[Home.]{\includegraphics[width=\linewidth]{figures/home.jpg}}\\[2mm]
+\subfloat[Join, opened from a shared link.]{\includegraphics[width=\linewidth]{figures/join.jpg}}
+\end{minipage}\hfil
+\begin{minipage}[c]{0.3\textwidth}
+\centering
+\subfloat[Lobby.]{\includegraphics[height=105mm]{figures/lobby.jpg}}
+\end{minipage}
+\caption{The other screens. (a)~The home page has only a title and two buttons. (b)~A shared link opens the join page with the game code filled in. (c)~The lobby shows the code, the link and a QR code, with the player list; only the host can start the game or remove players.}
+\label{fig:pages}
 \end{figure*}
 
-\subsection{Real-World Issues}
-\emph{Sustainable transport.} The game's world contains only e-scooters, buses, trains and a ferry. Players spend 24 rounds planning journeys across the region on those modes alone, along real streets and the real rail lines and ferry crossing. No claim is made that playing changes how anyone travels.
+\subsection{Real-World Issues}\label{sec:realworld}
+\reqs{C2, C4}
+\emph{Sustainable transport.} The game's world contains only e-scooters, buses, trains and a ferry. Players spend 24 rounds planning journeys across the region on those modes alone, along real streets and the real rail lines and ferry crossing. This fits United Nations Sustainable Development Goal~11, sustainable cities and communities \cite{un_sdg}, though no claim is made that playing changes how anyone travels.
 
 \emph{Sustainable software.} The same priority applied to every infrastructure decision. Pre-computing routes replaces hundreds of routing requests per game with one static file. The server is a single process in a 231~MB container image on hardware the author already owned, with no database, no cloud services and no new devices. The whole stack is open source, so the game is not tied to a vendor's pricing or lifetime. The one remaining inefficiency, an uncompressed 1.86~MB map file, is discussed in Section~\ref{sec:discussion}.
 
@@ -373,14 +422,15 @@ Several of these features came from user testing (Section~\ref{sec:users}): the 
 \section{Implementation}\label{sec:implementation}
 
 \subsection{Technology Choices}
+\reqs{N1, C1, C2}
 Table~\ref{tab:stack} lists the components used and why each was chosen.
 
-\begin{table}[!t]
+\begin{table*}[!t]
 \caption{Technology Stack.}
 \label{tab:stack}
 \centering
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}p{0.29\columnwidth}p{0.67\columnwidth}@{}}
+\small
+\begin{tabular}{@{}p{0.3\textwidth}p{0.62\textwidth}@{}}
 \toprule
 Component & Reason \\
 \midrule
@@ -394,9 +444,10 @@ JUnit 5, Mockito, AssertJ, JaCoCo, PIT & Unit to integration testing, coverage a
 Docker, Cloudflare Tunnel & One reproducible image; HTTPS to a home server without opening ports \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-\subsection{Server}
+\subsection{Server}\label{sec:server}
+\reqs{F1--F6}
 The backend is about 770 lines of Java code (1,460 including documentation) in 22 files.
 
 When a player submits a move, \texttt{Game.move} checks, in order, that:
@@ -414,18 +465,22 @@ Several players can send requests to the same game at the same moment, for examp
 
 Every 30~s, the server checks for games where the current player has not moved within the idle limit and ends them. Settings such as the detectives' ticket counts, the idle limit and which map file to load are all kept in one configuration file.
 
-\subsection{Client}
+\subsection{Client}\label{sec:client}
+\reqs{F7, N1}
 The frontend is 23 source files and about 2,400 lines. Game state is one Vue \texttt{reactive()} object that every page and component reads; a state-management library (Pinia) was used at first and removed, because two small stores did not justify a dependency. All server traffic goes through one module, \texttt{api.ts}: a single helper for REST calls, and \texttt{keepUpToDate()}, which opens the STOMP connection and maps each topic to a handler. The map component is the largest file, at about 700 lines. It loads the graph from the server, adds it as GeoJSON sources, draws one line layer per mode with small offsets so parallel modes sit side by side, and pre-draws the 16 possible pie icons for node mode combinations.
 
 \subsection{Resilience to Dropped Connections}\label{sec:resilience}
+\reqs{N2}
 The original design paused a game when a player disconnected and resumed it within a 60~s grace period. User testing on university and home Wi-Fi showed WebSockets dropping far more often than expected, so pausing would have interrupted games constantly. The design changed so that a dropped connection is not a game event at all. The STOMP client reconnects automatically, re-subscribes, and immediately fetches the full state over REST; a REST refresh also runs every 6~s regardless. Because every message is a complete snapshot rather than a change, a missed message costs at most one refresh interval and can never leave a client inconsistent. This is why the server sends whole views rather than differences, at the price of slightly larger messages.
 
-\subsection{Building the Wellington Map}
+\subsection{Building the Wellington Map}\label{sec:mapbuild}
+\reqs{F7, C1}
 Building the map was the hardest part of the project, and the rest of the game could not be fully tested until it was done. Road data for the region was exported from OSM with Overpass Turbo (about 5.7~MB of GeoJSON), and train lines were traced separately. A first approach that laid OSM road segments under each edge produced loops and doubled lines where segments overlapped. Fully automatic generation tended to connect every node to every neighbour, and some routed paths between node pairs wandered far from the direct line.
 
 The solution was a dedicated browser tool, the \emph{map creator}, built on MapLibre. It snaps nodes to the road network, routes each edge along roads with Dijkstra's shortest-path algorithm, and generates the network in layers: train stations and lines first, then bus clusters around each area, then e-scooter edges limited to short distances (at most 900~m). A road-use registry stops two edges claiming the same street, which removed the doubled lines. Generation is followed by manual editing (adding, joining, re-moding and renumbering nodes, with undo), a connected-components view to make sure every node is reachable, and export. The tool was later refactored from one 2,500-line file into nine modules of about 1,500 lines in total, and its output was checked byte for byte against the original before any behaviour changed.
 
-\subsection{Deployment}
+\subsection{Deployment}\label{sec:deploy}
+\reqs{C2}
 The Docker build compiles the frontend, copies it into the server's static folder and packages a single Java archive; the running container is one Java process that serves the pages, the REST API and the WebSocket endpoint. An earlier image ran nginx beside the server under a process supervisor, with a generated nginx configuration of over 100 lines. Removing it took away a process and a configuration language without losing anything, since Spring can serve static files under the same base path. A deploy script rebuilds from a Git tag, swaps the container and deletes old images, and a Cloudflare Tunnel publishes the server over HTTPS without opening ports on the home network.
 
 \subsection{Development Process and Use of AI}\label{sec:process}
@@ -446,11 +501,11 @@ Before any map code was written, three libraries were compared in a harness that
 \centering
 \begin{tikzpicture}
 \begin{axis}[
-  ybar, width=\columnwidth, height=46mm, bar width=10pt,
+  ybar, width=\columnwidth, height=60mm, bar width=12pt,
   ylabel={Render time (s)}, ymin=0, ymax=3.3,
   symbolic x coords={Baseline (4 nodes), Stress (200 nodes)}, xtick=data,
-  enlarge x limits=0.45, legend style={at={(0.02,0.98)}, anchor=north west, font=\scriptsize, draw=none},
-  ticklabel style={font=\scriptsize}, label style={font=\scriptsize},
+  enlarge x limits=0.45, legend style={at={(0.02,0.98)}, anchor=north west, font=\footnotesize, draw=none},
+  ticklabel style={font=\footnotesize}, label style={font=\footnotesize},
   error bars/y dir=both, error bars/y explicit]
 \addplot[fill=gray!60] coordinates {(Baseline (4 nodes),0.70) +- (0,0.045) (Stress (200 nodes),2.69) +- (0,0.072)};
 \addplot[fill=gray!20] coordinates {(Baseline (4 nodes),0.23) +- (0,0.023) (Stress (200 nodes),2.21) +- (0,0.055)};
@@ -467,12 +522,12 @@ Leaflet was fastest in both scenarios, by 0.17~s at baseline and 0.10~s under st
 \subsection{Functional Correctness}\label{sec:correctness}
 The backend has 135 automated tests in six layers (Table~\ref{tab:tests}), all passing on the final version, and none needing a browser. Unit tests build games on hand-drawn maps of five to eight nodes with fixed start positions, so each rule is tested against an exact expected outcome: for example, that both legs of a double move happen before any detective moves, that a reveal shows only the second leg's node, or that a detective with no legal move is skipped without spending a ticket. Integration tests run the real server and talk to it over HTTP and STOMP. Functional tests play complete games with one HTTP and one STOMP client per player, checking the game's invariants after every move.
 
-\begin{table}[!t]
+\begin{table*}[!t]
 \caption{Automated Test Suite.}
 \label{tab:tests}
 \centering
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrp{0.55\columnwidth}@{}}
+\small
+\begin{tabular}{@{}lrp{0.6\textwidth}@{}}
 \toprule
 Layer & Tests & What it checks \\
 \midrule
@@ -484,7 +539,7 @@ Functional & 4 & Full games over real HTTP and STOMP \\
 Property, fuzz & 4 & 300 seeded random games; random requests to every endpoint \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
 \emph{Regression tests.} The late-project review found eight bugs, three of them high severity: the game froze when Mr~X was boxed in (which also made an earlier end-to-end test fail at random, because 30\% of four-player starts on the small test map box him in on turn~1); any player could see Mr~X's position or act as another player (Section~\ref{sec:hidden}); and a detective leaving froze the game or skipped a turn. Each fix has at least one test that failed before it. The two STOMP attacks were written as tests and run against the old configuration, where the eavesdropper did receive Mr~X's private view, before the fix made them pass.
 
@@ -501,14 +556,16 @@ The frontend has no automated tests. It was manually tested after each update.
 \subsection{User Evaluation}\label{sec:users}
 Two rounds of play-testing with fellow students shaped the interface, and players also completed the SUS questionnaire.
 
+\emph{Open Day.} The game was demonstrated at a university Open Day, where visitors played it on the stand's laptops. The demonstration was a success. One planned feature did not work out: the lobby's QR code (Section~\ref{sec:ui}) was meant to let visitors join from their phones. Joining by phone works, but the board was designed for a desktop screen, and on a phone the map and side panel do not fit well enough to play, so in practice the QR code was of little use.
+
 \emph{Iterative rounds.} After each round the observed problems were listed and fixed before the next (Table~\ref{tab:feedback}). Round~1 exposed basic usability gaps; round~2 found only presentation issues, suggesting the first round's fixes worked.
 
-\begin{table}[!t]
+\begin{table*}[!t]
 \caption{Play-Test Findings and Resulting Changes.}
 \label{tab:feedback}
 \centering
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}cp{0.42\columnwidth}p{0.46\columnwidth}@{}}
+\small
+\begin{tabular}{@{}cp{0.38\textwidth}p{0.45\textwidth}@{}}
 \toprule
 Round & Finding & Change \\
 \midrule
@@ -525,34 +582,41 @@ Round & Finding & Change \\
 2 & ``R12'' unclear & ``Round 12'' written in full \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
 \emph{SUS results.} Seven players (six detectives and one Mr~X, in games of four to six players) completed the questionnaire after a full game. The overall mean was 72.5 (range 60--95): 72.9 for detectives ($n=6$) and 70.0 for Mr~X ($n=1$). This is above the average of 68 \cite{sauro2011sus}, meeting N3. In free-text comments, three of the seven asked for a tutorial or rules walk-through; others found the Mr~X log hard to read at first or the reachable-node list cramped on small screens, praised the game as fun and replayable, and asked for custom lobby rules.
 
-\emph{Limitations.} Seven participants is too few for a precise score: one respondent can move the mean by several points. Only one participant played Mr~X; the sample is a convenience sample of engineering students, likely more at ease with new software than the general public; and the questionnaire was given after the round-2 fixes, so there is no before-and-after comparison.
+\emph{Limitations.} Seven participants is too few for a precise score: one respondent can move the mean by several points. Only one participant played Mr~X, and the questionnaire was given after the round-2 fixes, so there is no before-and-after comparison. The participants were all students. They may be more at ease with new software than the general public, but they are also the audience the game was built for: students playing with friends, and the prospective students who visit an Open Day.
 
-\subsection{Requirements Traceability}
-Table~\ref{tab:trace} summarises each requirement against its evidence.
+\subsection{Requirements Traceability}\label{sec:trace}
+Table~\ref{tab:trace} brings the report together: for every requirement it lists where it is designed and implemented and the evidence that it is met.
 
-\begin{table}[!t]
-\caption{Requirements and Outcomes.}
+\begin{table*}[!t]
+\caption{Requirements, Where They Are Addressed, and Outcomes.}
 \label{tab:trace}
 \centering
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lp{0.62\columnwidth}l@{}}
+\small
+\begin{tabular}{@{}lp{0.2\textwidth}p{0.2\textwidth}p{0.37\textwidth}l@{}}
 \toprule
-Req. & Evidence & Status \\
+Req. & Summary & Sections & Evidence & Status \\
 \midrule
-F1--F6 & 135 tests including unit tests per rule; 100\% mutation score & Met \\
-F4, goal 2 & Per-viewer views, tokens, exact-match broker; attack tests & Met \\
-F7 & 216-node, 372-edge graph on real streets (Fig.~\ref{fig:graph}) & Met \\
-N1 & Chrome and Firefox used throughout; Safari untested & Partly \\
-N2 & Reconnect and REST re-sync; 6~s worst case & Met \\
-N3 & SUS 72.5 against 68 ($n=7$) & Met \\
-C1--C4 & No paid services; one container; within budget& Met \\
+F1 & Lobby: create, join, share, start & \ref{sec:states}, \ref{sec:ui}, \ref{sec:server} & Lifecycle and integration tests; play-tests; Open Day & Met \\
+F2 & Random roles and start nodes & \ref{sec:domain}, \ref{sec:server} & Unit tests with fixed and seeded random set-ups & Met \\
+F3 & Movement and tickets & \ref{sec:states}, \ref{sec:server} & Unit test per rule; 100\% mutation score & Met \\
+F4 & Mr~X hidden except on reveal rounds & \ref{sec:hidden} & Per-viewer views; tokens; attack tests on REST and STOMP; property tests over 300 games & Met \\
+F5 & Invisible and Double tickets & \ref{sec:domain}, \ref{sec:server} & Unit tests, including chained-double and plain-DOUBLE rejection & Met \\
+F6 & Win, loss and early endings & \ref{sec:states}, \ref{sec:server} & Unit and lifecycle tests for every ending & Met \\
+F7 & Real Wellington map & \ref{sec:mapdesign}, \ref{sec:mapbuild} & 216-node, 372-edge graph on real streets (Fig.~\ref{fig:graph}) & Met \\
+N1 & Standard desktop browsers & \ref{sec:architecture}, \ref{sec:client} & Used in Chrome and Firefox throughout; Safari untested & Partly \\
+N2 & Survive dropped connections & \ref{sec:resilience} & Reconnect and REST re-sync; at most 6~s behind & Met \\
+N3 & SUS above 68 & \ref{sec:ui} & SUS 72.5 ($n=7$) & Met \\
+C1 & No paid per-request services & \ref{sec:mapdesign}, \ref{sec:benchmark} & Pre-computed routes; open map tools & Met \\
+C2 & One self-hosted container & \ref{sec:architecture}, \ref{sec:deploy} & Single-process image on the home server & Met \\
+C3 & Solo, 24 weeks, budget & \ref{sec:process} & Delivered within the project period and budget & Met \\
+C4 & Original name not used & \ref{sec:realworld} & Game named \emph{Hunting Mr.~X} & Met \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Discussion}\label{sec:discussion}
@@ -592,5 +656,9 @@ The author thanks Jens Dietrich and Stuart Marshall for their supervision and fe
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
+
+\appendices
+\section{SUS Questionnaire}\label{app:sus}
+The questionnaire given to participants after each game is available at \url{https://forms.gle/eAoJknoDFNU4Wjmy8}.
 
 \end{document}

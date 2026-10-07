@@ -7,7 +7,8 @@
 \providecommand{\BIBentrySTDinterwordspacing}{\spaceskip=0pt\relax}
 \providecommand{\BIBentryALTinterwordstretchfactor}{4}
 \providecommand{\BIBentryALTinterwordspacing}{\spaceskip=\fontdimen2\font plus
-\BIBentryALTinterwordstretchfactor\fontdimen3\font minus \fontdimen4\font\relax}
+\BIBentryALTinterwordstretchfactor\fontdimen3\font minus
+  \fontdimen4\font\relax}
 \providecommand{\BIBforeignlanguage}[2]{{%
 \expandafter\ifx\csname l@#1\endcsname\relax
 \typeout{** WARNING: IEEEtran.bst: No hyphenation pattern has been}%
@@ -21,45 +22,76 @@
 \BIBdecl
 
 \bibitem{rules_1983}
-{Projekt Team III}, \emph{Hidden-Movement Detective Board Game: Rules of Play}, Ravensburger, Ravensburg, Germany, 1983, winner of the Spiel des Jahres award, 1983.
+M.~Burggraf, D.~Garrels, W.~H{\"o}rmann, F.~Ifland, W.~Scheerer, and
+  W.~Schlegel, ``{Scotland Yard},'' Board game, Ravensburger, Ravensburg,
+  Germany, 1983, winner of the Spiel des Jahres award, 1983.
 
 \bibitem{repo}
-M.~Bao, ``Hunting {Mr.~X}: {Wellington} edition, source repository (tag {ENGR\_489\_FINAL\_ARTEFACT}),'' [Online]. Available: \url{https://github.com/Ming-Bao/HuntingMrX/tree/ENGR_489_FINAL_ARTEFACT}, 2026.
+M.~Bao, ``{Hunting Mr.~X: Wellington Edition}, source repository (tag
+  {ENGR\_489\_FINAL\_ARTEFACT}),'' [Online]. Available:
+  \url{https://github.com/Ming-Bao/HuntingMrX/tree/ENGR_489_FINAL_ARTEFACT},
+  2026.
 
 \bibitem{geoguessr}
-{GeoGuessr AB}, ``{GeoGuessr},'' [Online]. Available: \url{https://www.geoguessr.com}, 2013, accessed: Oct. 2, 2026.
+{GeoGuessr AB}, ``{GeoGuessr},'' [Online]. Available:
+  \url{https://www.geoguessr.com}, 2013, accessed: Oct. 2, 2026.
 
 \bibitem{paavilainen2017pokemon}
-J.~Paavilainen, H.~Korhonen, K.~Alha, J.~Stenros, E.~Koskinen, and F.~M{\"a}yr{\"a}, ``The {Pok{\'e}mon GO} experience: A location-based augmented reality mobile game goes mainstream,'' in \emph{Proc. CHI Conf. Human Factors in Computing Systems}, Denver, CO, USA, 2017, pp. 2493--2498.
+J.~Paavilainen, H.~Korhonen, K.~Alha, J.~Stenros, E.~Koskinen, and
+  F.~M{\"a}yr{\"a}, ``The {Pok{\'e}mon GO} experience: A location-based
+  augmented reality mobile game goes mainstream,'' in \emph{Proc. CHI Conf.
+  Human Factors in Computing Systems}, Denver, CO, USA, 2017, pp. 2493--2498.
 
 \bibitem{ssy}
-``{SSY}: A simple browser version of the board game,'' [Online]. Available: \url{https://ssy.pvx.sk}, accessed: Oct. 4, 2026.
+``{SSY -- Simple Scotland Yard},'' [Online]. Available:
+  \url{https://ssy.pvx.sk}, accessed: Oct. 4, 2026.
 
 \bibitem{tts}
-{Berserk Games}, ``{Tabletop Simulator},'' Steam. [Online]. Available: \url{https://store.steampowered.com/app/286160/}, 2015, accessed: Oct. 4, 2026.
+{Berserk Games}, ``{Tabletop Simulator},'' Steam. [Online]. Available:
+  \url{https://store.steampowered.com/app/286160/}, 2015, accessed: Oct. 4,
+  2026.
 
 \bibitem{official_pc}
-{BitBarons GmbH} and {Markt+Technik Verlag GmbH}, ``Official {PC} adaptation of the 1983 board game,'' Steam. [Online]. Available: \url{https://store.steampowered.com/app/3073810/}, 2024, accessed: Oct. 4, 2026.
+{BitBarons GmbH} and {Markt+Technik Verlag GmbH}, ``{Scotland Yard -- Hunting
+  Mister X},'' Steam. [Online]. Available:
+  \url{https://store.steampowered.com/app/3073810/}, Oct. 2024, accessed: Oct.
+  4, 2026.
 
 \bibitem{yan2005cheating}
-J.~Yan and B.~Randell, ``A systematic classification of cheating in online games,'' in \emph{Proc. 4th ACM SIGCOMM Workshop on Network and System Support for Games (NetGames)}, Hawthorne, NY, USA, 2005, pp. 1--9.
+J.~Yan and B.~Randell, ``A systematic classification of cheating in online
+  games,'' in \emph{Proc. 4th ACM SIGCOMM Workshop on Network and System
+  Support for Games (NetGames)}, Hawthorne, NY, USA, 2005, pp. 1--6.
 
 \bibitem{rfc6455}
-I.~Fette and A.~Melnikov, ``The {WebSocket} protocol,'' RFC 6455, Internet Engineering Task Force, Dec. 2011.
+I.~Fette and A.~Melnikov, ``The {WebSocket} protocol,'' RFC 6455, Internet
+  Engineering Task Force, Dec. 2011.
 
 \bibitem{googlemaps_pricing}
-{Google}, ``{Google Maps Platform} pricing,'' [Online]. Available: \url{https://mapsplatform.google.com/pricing/}, accessed: Oct. 2, 2026.
+{Google}, ``{Google Maps Platform} pricing,'' [Online]. Available:
+  \url{https://mapsplatform.google.com/pricing/}, accessed: Oct. 2, 2026.
 
 \bibitem{maplibre}
-{MapLibre}, ``{MapLibre GL JS} documentation,'' [Online]. Available: \url{https://maplibre.org/maplibre-gl-js/docs/}, accessed: Oct. 2, 2026.
+{MapLibre}, ``{MapLibre GL JS} documentation,'' [Online]. Available:
+  \url{https://maplibre.org/maplibre-gl-js/docs/}, accessed: Oct. 2, 2026.
 
 \bibitem{osm}
-{OpenStreetMap Contributors}, ``{OpenStreetMap} copyright and licence ({ODbL}),'' [Online]. Available: \url{https://www.openstreetmap.org/copyright}, accessed: Oct. 2, 2026.
+{OpenStreetMap Contributors}, ``{OpenStreetMap} copyright and licence
+  ({ODbL}),'' [Online]. Available:
+  \url{https://www.openstreetmap.org/copyright}, accessed: Oct. 2, 2026.
 
 \bibitem{brooke1996sus}
-J.~Brooke, ``{SUS}: A ``quick and dirty'' usability scale,'' in \emph{Usability Evaluation in Industry}, P.~W. Jordan, B.~Thomas, B.~A. Weerdmeester, and I.~L. McClelland, Eds.\hskip 1em plus 0.5em minus 0.4em\relax London, U.K.: Taylor \& Francis, 1996, pp. 189--194.
+J.~Brooke, ``{SUS}: A ``quick and dirty'' usability scale,'' in \emph{Usability
+  Evaluation in Industry}, P.~W. Jordan, B.~Thomas, B.~A. Weerdmeester, and
+  I.~L. McClelland, Eds.\hskip 1em plus 0.5em minus 0.4em\relax London, U.K.:
+  Taylor \& Francis, 1996, pp. 189--194.
 
 \bibitem{sauro2011sus}
-J.~Sauro, \emph{A Practical Guide to the System Usability Scale: Background, Benchmarks and Best Practices}.\hskip 1em plus 0.5em minus 0.4em\relax Denver, CO, USA: Measuring Usability LLC, 2011.
+J.~Sauro, \emph{A Practical Guide to the System Usability Scale: Background,
+  Benchmarks and Best Practices}.\hskip 1em plus 0.5em minus 0.4em\relax
+  Denver, CO, USA: Measuring Usability LLC, 2011.
+
+\bibitem{un_sdg}
+{United Nations}, ``Transforming our world: The 2030 agenda for sustainable
+  development,'' General Assembly Resolution A/RES/70/1, 2015.
 
 \end{thebibliography}
