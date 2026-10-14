@@ -81,7 +81,7 @@
 <path clip-rule="nonzero" d="M 0 399 L 26 399 L 26 431.695312 L 0 431.695312 Z M 0 399 "/>
 </clipPath>
 <clipPath id="clip-6">
-<path clip-rule="nonzero" d="M 425 0.210938 L 455 0.210938 L 455 37 L 425 37 Z M 425 0.210938 "/>
+<path clip-rule="nonzero" d="M 424 0.210938 L 455 0.210938 L 455 37 L 424 37 Z M 424 0.210938 "/>
 </clipPath>
 <clipPath id="clip-7">
 <path clip-rule="nonzero" d="M 430 30 L 457 30 L 457 59 L 430 59 Z M 430 30 "/>
@@ -96,7 +96,7 @@
 <path clip-rule="nonzero" d="M 418 62 L 457 62 L 457 94 L 418 94 Z M 418 62 "/>
 </clipPath>
 <clipPath id="clip-11">
-<path clip-rule="nonzero" d="M 431 22 L 457 22 L 457 50 L 431 50 Z M 431 22 "/>
+<path clip-rule="nonzero" d="M 431 21 L 457 21 L 457 50 L 431 50 Z M 431 21 "/>
 </clipPath>
 <clipPath id="clip-12">
 <path clip-rule="nonzero" d="M 430 25 L 457 25 L 457 54 L 430 54 Z M 430 25 "/>
