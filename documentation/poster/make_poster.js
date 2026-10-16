@@ -3,7 +3,7 @@
 // raster at 300 DPI or more, laid out to "ENGR489 Poster Guidelines.pdf" (300-800 words, key
 // findings near the top). The story is building a demo for the university's Open Day; the
 // centrepiece is the game board itself, the whole Wellington region, followed by the technical
-// challenges and the tech stack. The look follows an academic-poster template (outlined section
+// challenges, the tech stack and the evaluation. The look follows an academic-poster template (outlined section
 // boxes with icon headings, in the template's teal) under a dark header in the game's own dark UI
 // colour, with the game's ticket colours (frontend/src/shared/tickets.ts) as accents. Every number
 // is from the final report or the game's map file.
@@ -15,7 +15,6 @@
 //                  about 355 DPI at print size)
 //   hero.jpg       a close-up of the city and harbour, dimmed and faded into the header colour on
 //                  its left (3949 x 2080 px, about 335 DPI)
-//   board-mrx.jpg  Mr X's screen in a game (3600 x 2150 px)
 // plus qr.svg (link to the live game, https://vuw-mrx.xyz) and icons/ (Lucide, the game's icon set, in white).
 // best-so-far/ holds an earlier version, kept for comparison.
 const path = require("path");
@@ -154,8 +153,8 @@ text(M + 15, 119, 360, 13, [{ text: "Ming Bao", options: { bold: true, color: C.
 
 // ---- Key findings: tiles that sit across the bottom edge of the header ----
 chip(M, 134, "KEY FINDINGS", AMBER, C.text1, 20);
-const stats = [["users", "Open Day", "played live by visitors", "on the stand's laptops"],
-  ["zap", "Live play", "every move appears on", "every screen as it happens"],
+const stats = [["school", "Future students", "a demo for prospective students", "at the university's Open Days"],
+  ["dices", "Scotland Yard", "inspired by the classic board game", "by Ravensburger"],
   ["monitor-smartphone", "No install", "join from a web browser", "with a link or a six-character code"]];
 const sw = (COL - 24) / 3;
 stats.forEach(([ic, big, l1, l2], i) => {
@@ -163,7 +162,7 @@ stats.forEach(([ic, big, l1, l2], i) => {
   rect(sx, sy, sw, 62, { fill: { color: P }, rectRadius: mm(4),
     shadow: { type: "outer", color: "000000", opacity: 0.3, blur: 8, offset: 3, angle: 90 } });
   icon(ic, sx + 8, sy + 8, 11);
-  text(sx, sy + 4, sw, 26, big, { fontSize: 60, bold: true, color: C.background1, align: "center",
+  text(sx + 12, sy + 4, sw - 16, 26, big, { fontSize: 50, bold: true, color: C.background1, align: "center",
     valign: "middle", fontFace: HEAD });
   text(sx + 6, sy + 31, sw - 12, 28, [{ text: l1, options: { bold: true, breakLine: true } },
     { text: l2, options: { color: C.accent2 } }], { fontSize: 26, align: "center", color: C.background1 });
@@ -238,7 +237,7 @@ const challenges = [
   ["lock", HEX.accent4, "Keeping a secret", "Each player is sent their own view, so Mr X's position never reaches a detective's screen."],
   ["refresh-cw", HEX.accent6, "Staying in sync", "Every move is pushed live to every screen. A dropped connection catches up by itself."],
   ["map", HEX.accent3, "A free real map", "Routes along real roads are worked out once, not paid for on every move."],
-  ["shield-check", HEX.accent5, "Proving it works", "135 automated tests, including 300 random games. Every planted bug was caught."],
+  ["shield-check", HEX.accent5, "Proving it works", "The rules sit apart from the server, so each is tested exactly. 300 random games hunt for leaks."],
 ];
 const kw = (COL - 16 - 30) / 4;
 challenges.forEach(([ic, color, title, body], i) => {
@@ -250,9 +249,9 @@ challenges.forEach(([ic, color, title, body], i) => {
   text(kx + 5, top + 24, kw - 10, 54, body, { fontSize: 27 });
 });
 
-// ---- Tech stack (chips + a real screen) | Outcome and next steps ----
+// ---- Tech stack | Evaluation, outcome and next steps ----
 y = 673;
-const pw = 322, cx = M + pw + 12, cw = COL - pw - 12;
+const pw = 222, cx = M + pw + 12, cw = COL - pw - 12;
 top = section(M, y, pw, 124, "layers", "Tech stack");
 [["Screens", ["Vue 3", "TypeScript", "Tailwind CSS"]],
   ["Map", ["MapLibre GL", "OpenStreetMap"]],
@@ -265,20 +264,24 @@ top = section(M, y, pw, 124, "layers", "Tech stack");
   let chx = M + 58;
   techs.forEach((t) => { chx += chip(chx, ry, t, C.background2, C.text1) + 4; });
 });
-const shotW = 100, shotH = shotW * 2150 / 3600, shotX = M + pw - shotW - 8;
-slide.addImage({ path: here("board-mrx.jpg"), x: mm(shotX), y: mm(top + 4), w: mm(shotW), h: mm(shotH),
-  altText: "Mr X's screen during a game", objectName: "board-mrx" });
-text(shotX, top + shotH + 6, shotW, 9, "Mr X's screen in a live game", { fontSize: 22, color: C.text2,
-  align: "center" });
-
-top = section(cx, y, cw, 124, "flag", "Outcome", "solid");
-bullets(cx + 8, top + 2, cw - 16, 40, ["Played live at Open Day",
-  "Anyone can join over the internet",
-  "Ready for future Open Days"], { color: C.background1 });
-text(cx + 8, top + 45, cw - 16, 10, "NEXT STEPS", { fontSize: 26, bold: true, fontFace: HEAD,
-  color: C.accent2, charSpacing: 2 });
-bullets(cx + 8, top + 57, cw - 16, 38, ["A big-screen view for the stand",
-  "A phone-friendly layout", "Computer players for solo games"], { color: C.background1 });
+top = section(cx, y, cw, 124, "clipboard-check", "Evaluation & outcome", "solid");
+const ew = (cw - 16 - 18) / 4;
+[["135", "automated tests, all passing"], ["99.2%", "of server code lines covered"],
+  ["100%", "of 199 planted bugs caught"], ["2", "rounds of user testing"]].forEach(([big, label], i) => {
+  const ex = cx + 8 + i * (ew + 6);
+  rect(ex, top - 2, ew, 40, { fill: { color: C.text1 }, rectRadius: mm(3) });
+  text(ex, top, ew, 17, big, { fontSize: 48, bold: true, color: AMBER, fontFace: HEAD, align: "center",
+    valign: "middle" });
+  text(ex + 3, top + 18, ew - 6, 19, label, { fontSize: 22, color: C.background1, align: "center" });
+});
+const hw = (cw - 28) / 2;
+[["OUTCOME", ["Played live at Open Day", "Anyone can join over the internet", "Ready for future Open Days"]],
+  ["NEXT STEPS", ["A big-screen view for the stand", "A phone-friendly layout", "Computer players for solo games"]]]
+  .forEach(([head, items], i) => {
+    const hx = cx + 8 + i * (hw + 12);
+    text(hx, top + 44, hw, 10, head, { fontSize: 26, bold: true, fontFace: HEAD, color: C.accent2, charSpacing: 2 });
+    bullets(hx, top + 56, hw, 38, items, { color: C.background1 });
+  });
 
 (async () => {
   const out = here("poster.pptx");
