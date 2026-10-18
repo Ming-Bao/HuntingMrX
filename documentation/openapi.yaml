@@ -9,8 +9,9 @@ info:
     Creating or joining a game returns a public `playerId` and a secret
     `playerToken`. The id is shown to everyone (in `players[]` and
     `currentPlayerId`). The token is returned only in that one response and
-    never appears in any other response or broadcast. Every call that acts
-    as a player sends it in the `X-Player-Token` header.
+    never appears in any other response or message body; it only names that
+    player's own private STOMP topics. Every call that acts as a player
+    sends it in the `X-Player-Token` header.
 
     ## Real-time updates (WebSocket / STOMP)
 
@@ -42,6 +43,11 @@ info:
     such as `/topic/games/{gameId}/players/**` receives nothing, and any SEND
     frame from a client is dropped. Clients only ever subscribe.
 
+    **Missed pushes:** a push is sent once and never repeated. The client
+    also fetches `GET /api/games/{id}` on every (re)connect and every 6 s,
+    so a missed push costs at most 6 s. Every push is a whole snapshot, so
+    nothing needs replaying.
+
     **Kick detection:** a client should check on each push whether its own
     `playerId` is still present in `players`. If it isn't and `phase` is
     still `LOBBY`, the client was kicked.
@@ -50,7 +56,7 @@ info:
 
     When the server runs with `BASE_PATH` set (e.g. `/mrx`), every REST path
     and the `/ws` endpoint sit under that prefix (`/mrx/api/...`, `/mrx/ws`).
-  version: 0.1.14
+  version: 0.1.15
 servers:
   - url: http://localhost:8999
     description: Local development server
@@ -116,7 +122,8 @@ paths:
     post:
       summary: Join an existing game
       description: |
-        Joins a LOBBY-phase game by its join code (case-insensitive). Returns
+        Joins a LOBBY-phase game by its join code (case and surrounding spaces
+        are ignored). The player name is trimmed before it's checked. Returns
         the new player's public id, their secret token and the game state,
         and broadcasts the updated state to the game's topics.
       operationId: joinGame
@@ -205,7 +212,8 @@ paths:
 
         One player is picked at random as `MR_X` (unlimited transport
         tickets, 2 DOUBLE, one Invisible `BLACK` ticket per detective). The
-        rest become `DETECTIVE` (ticket counts from server config) in a
+        rest become `DETECTIVE` (ticket counts from server config: 12
+        ESCOOTER, 8 BUS, 6 TRAIN, 2 FERRY by default) in a
         random turn order fixed for the game. Every player gets a distinct
         random start node. In the rare case that Mr X starts with detectives
         on every neighbouring node, the game ends at once and the detectives win.
@@ -264,7 +272,7 @@ paths:
         they stand, each with the tickets that would pay for it: matching
         transport tickets they hold, plus the Invisible ticket (`BLACK`) on
         any edge if they hold one. Detectives' positions block Mr X. These
-        are the caller's own moves, whoever's turn it is.
+        are the caller's own moves, whoever's turn it is, sorted by node id.
 
         The server also pushes this to
         `/topic/games/{gameId}/players/{playerToken}/valid-moves` whenever it
@@ -389,8 +397,9 @@ paths:
         - Lobby, host leaves: the lobby closes for everyone (`phase: ENDED`,
           `abortReason: "The host left the game"`); broadcasts it.
         - In progress, anyone leaves: the game ends for everyone
-          (`phase: ENDED`, `abortReason` such as `"Alice has left the game"`);
-          broadcasts it.
+          (`phase: ENDED`, `abortReason` such as `"Alice has left the game"`;
+          Mr X is named `"Mr. X"` so his identity stays hidden); broadcasts it.
+        - Ended: the player is removed; broadcasts the updated state.
         - The last player leaving deletes the game.
 
         **Kick behaviour:** broadcasts the updated state; the kicked client
@@ -485,6 +494,7 @@ webhooks:
         **Triggered by:**
         | Event | What changes |
         |---|---|
+        | `POST /api/games/join`, a kick or a leave | `players` updated |
         | `POST /api/games/{id}/start` | Roles, tickets and positions assigned |
         | `POST /api/games/{id}/moves` | Position updated; turn advanced |
         | Mr X caught or boxed in | `phase` → `ENDED`, `winner: "DETECTIVES"` |
@@ -497,6 +507,7 @@ webhooks:
         - `mrXDoubleMovePending === true`: show the "second leg" banner and wait for the new valid-moves push
         - A new `mrXLog` entry with a `nodeId`: show the reveal popup (to Mr X and to detectives)
         - `currentPlayerId` becomes this player's id: show the "Your Turn" popup
+        - It is this player's turn but no valid moves have arrived: fetch `GET /api/games/{id}/valid-moves`
         - Update map markers and ticket counts from the new state
       requestBody:
         description: This player's view of the game.
@@ -519,9 +530,10 @@ webhooks:
         Mr X again after the first leg of a double move). Subscribe on game
         board mount alongside the per-player state topic.
 
-        The client highlights these nodes on the map and fills the ticket
-        picker from them. If the push is missed, call
-        `GET /api/games/{id}/valid-moves` with the token.
+        The client lists these nodes in the side panel's reachable-node list,
+        and opens a ticket picker when one of them is clicked on the map. The
+        map doesn't highlight them. If the push is missed, the board page
+        calls `GET /api/games/{id}/valid-moves` with the token.
       requestBody:
         description: Valid destinations and ticket options for the current player.
         content:
@@ -574,7 +586,7 @@ components:
           type: string
           minLength: 1
           maxLength: 20
-          description: Display name of the host player
+          description: Display name of the host player; trimmed, then 1 to 20 characters
         maxPlayers:
           type: integer
           minimum: 2
@@ -589,12 +601,14 @@ components:
           type: string
           minLength: 6
           maxLength: 6
-          description: 6-character join code shown in the lobby (case-insensitive)
+          description: |
+            6-character join code shown in the lobby (A–Z and 0–9). Case and
+            surrounding spaces are ignored; a code that matches no game gets 404.
         playerName:
           type: string
           minLength: 1
           maxLength: 20
-          description: Display name chosen by the joining player
+          description: Display name chosen by the joining player; trimmed, then 1 to 20 characters
 
     JoinResponse:
       type: object
@@ -712,7 +726,11 @@ components:
             - type: 'null'
         abortReason:
           type: [string, 'null']
-          description: Why the game ended without a winner, e.g. "The host left the game" or "Alice has left the game"
+          description: |
+            Why the game ended without a winner: "The host left the game",
+            "Alice has left the game" ("Mr. X has left the game" for Mr X), or
+            "A player exceeded the 15-minute turn limit" (the minutes follow
+            `game.turn-timer-seconds`)
         mrXLog:
           type: array
           items:
@@ -817,10 +835,13 @@ components:
           description: Longitude in decimal degrees
         label:
           type: string
-          description: Human-readable node name
+          description: Label shown and searched on the map; in `map.json` it is the node number as a string
         offRoad:
           type: boolean
-          description: Set by the map creator (`mapCreator/`) for nodes placed off the road network; the game ignores it
+          description: |
+            Set by the map creator (`mapCreator/`) on train-station nodes it
+            placed on the rail line rather than the road network, so it draws
+            their road edges as straight lines. The game ignores it.
 
     GraphEdge:
       type: object
@@ -828,10 +849,10 @@ components:
       properties:
         from:
           type: integer
-          description: ID of the source node
+          description: ID of one end; edges are undirected
         to:
           type: integer
-          description: ID of the destination node
+          description: ID of the other end
         modes:
           type: array
           items:
@@ -840,7 +861,11 @@ components:
           description: Transport modes available on this edge; any other value stops the server at startup
         coordinates:
           type: array
-          description: Road-following polyline as [lng, lat] pairs; omitted for straight-line edges
+          description: |
+            The path the map draws, as [lng, lat] pairs. Every edge in
+            `map.json` and `test-map.json` has one; a straight edge has just
+            its two ends. If it's missing, the frontend draws a straight line.
+            The server ignores it.
           items:
             type: array
             items:
